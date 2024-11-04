@@ -67,6 +67,8 @@ public:
     virtual void computeThroughput();
 
     virtual void setPipe() override;
+
+    virtual bool nextSeg(uint32_t& seqNum, bool isRecovery);
 protected:
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;

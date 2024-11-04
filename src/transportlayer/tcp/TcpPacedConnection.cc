@@ -452,7 +452,7 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
 
         uint32_t seqNum;
 
-        if (!nextSeg(seqNum)) // if nextSeg() returns false (=failure): terminate steps C.1 -- C.5
+        if (!nextSeg(seqNum, true)) // if nextSeg() returns false (=failure): terminate steps C.1 -- C.5
             return false;
 
         uint32_t sentBytes = sendSegmentDuringLossRecoveryPhase(seqNum);
@@ -562,12 +562,13 @@ void TcpPacedConnection::setPipe() {
     uint32_t length = 0; // required for rexmitQueue->checkSackBlock()
     bool sacked; // required for rexmitQueue->checkSackBlock()
     bool rexmitted; // required for rexmitQueue->checkSackBlock()
+    auto currIter = rexmitQueue->searchSackBlock(state->snd_una);
 
     rexmitQueue->updateLost(rexmitQueue->getHighestSackedSeqNum());
 
     for (uint32_t s1 = state->snd_una; seqLess(s1, state->snd_max); s1 +=
             length) {
-        rexmitQueue->checkSackBlock(s1, length, sacked, rexmitted);
+        rexmitQueue->checkSackBlockIter(s1, length, sacked, rexmitted, currIter);
         if(length == 0){
             break;
         }
@@ -595,6 +596,146 @@ void TcpPacedConnection::setPipe() {
     }
     state->pipe = currentInFlight;
 }
+
+bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
+{
+    ASSERT(state->sack_enabled);
+
+    // RFC 3517, page 5: "This routine uses the scoreboard data structure maintained by the
+    // Update() function to determine what to transmit based on the SACK
+    // information that has arrived from the data receiver (and hence
+    // been marked in the scoreboard).  NextSeg () MUST return the
+    // sequence number range of the next segment that is to be
+    // transmitted, per the following rules:"
+    //state->highRxt = rexmitQueue->getHighestRexmittedSeqNum(); not needed?
+
+    uint32_t highestSackedSeqNum = rexmitQueue->getHighestSackedSeqNum();
+    uint32_t shift = state->snd_mss;
+    bool sacked = false; // required for rexmitQueue->checkSackBlock()
+    bool rexmitted = false; // required for rexmitQueue->checkSackBlock()
+    //auto currIter = rexmitQueue->searchSackBlock(state->highRxt);
+    seqNum = 0;
+
+//    if (state->ts_enabled){
+//        shift -= B(TCP_OPTION_TS_SIZE).get();
+//    }
+    // RFC 3517, page 5: "(1) If there exists a smallest unSACKed sequence number 'S2' that
+    // meets the following three criteria for determining loss, the
+    // sequence range of one segment of up to SMSS octets starting
+    // with S2 MUST be returned.
+    //
+    // (1.a) S2 is greater than HighRxt.
+    //
+    // (1.b) S2 is less than the highest octet covered by any
+    //       received SACK.
+    //
+    // (1.c) IsLost (S2) returns true."
+
+    // Note: state->highRxt == RFC.HighRxt + 1
+
+    uint32_t seqPerRule3 = 0;
+    bool isSeqPerRule3Valid = false;
+
+    for (uint32_t s2 = state->highRxt;
+         seqLess(s2, state->snd_max) && seqLess(s2, highestSackedSeqNum);
+         s2 += shift)
+    {
+        //rexmitQueue->checkSackBlockIter(s2, shift, sacked, rexmitted, currIter);
+        rexmitQueue->checkSackBlock(s2, shift, sacked, rexmitted);
+
+        if (!sacked && !rexmitted) {
+            //if (isLost(s2)) { // 1.a and 1.b are true, see above "for" statement
+            if(rexmitQueue->checkIsLost(s2, highestSackedSeqNum)) {
+                seqNum = s2;
+                return true;
+            }
+            else if(seqPerRule3 == 0 && isRecovery)
+            {
+                isSeqPerRule3Valid = true;
+                seqPerRule3 = s2;
+            }
+
+            break; // !isLost(x) --> !isLost(x + d)
+        }
+    }
+
+    //rexmitQueue->checkSackBlockIsLost(state->highRxt, state->snd_max, highestSackedSeqNum);
+    // RFC 3517, page 5: "(2) If no sequence number 'S2' per rule (1) exists but there
+    // exists available unsent data and the receiver's advertised
+    // window allows, the sequence range of one segment of up to SMSS
+    // octets of previously unsent data starting with sequence number
+    // HighData+1 MUST be returned."
+    {
+        // check how many unsent bytes we have
+        uint32_t buffered = sendQueue->getBytesAvailable(state->snd_max);
+        uint32_t maxWindow = state->snd_wnd;
+        // effectiveWindow: number of bytes we're allowed to send now
+        uint32_t effectiveWin = maxWindow - state->pipe;
+
+        if (buffered > 0 && effectiveWin >= state->snd_mss) {
+            seqNum = state->snd_max; // HighData = snd_max
+
+            return true;
+        }
+    }
+
+    // RFC 3517, pages 5 and 6: "(3) If the conditions for rules (1) and (2) fail, but there exists
+    // an unSACKed sequence number 'S3' that meets the criteria for
+    // detecting loss given in steps (1.a) and (1.b) above
+    // (specifically excluding step (1.c)) then one segment of up to
+    // SMSS octets starting with S3 MAY be returned.
+    //
+    // Note that rule (3) is a sort of retransmission "last resort".
+    // It allows for retransmission of sequence numbers even when the
+    // sender has less certainty a segment has been lost than as with
+    // rule (1).  Retransmitting segments via rule (3) will help
+    // sustain TCP's ACK clock and therefore can potentially help
+    // avoid retransmission timeouts.  However, in sending these
+    // segments the sender has two copies of the same data considered
+    // to be in the network (and also in the Pipe estimate).  When an
+    // ACK or SACK arrives covering this retransmitted segment, the
+    // sender cannot be sure exactly how much data left the network
+    // (one of the two transmissions of the packet or both
+    // transmissions of the packet).  Therefore the sender may
+    // underestimate Pipe by considering both segments to have left
+    // the network when it is possible that only one of the two has.
+    //
+    // We believe that the triggering of rule (3) will be rare and
+    // that the implications are likely limited to corner cases
+    // relative to the entire recovery algorithm.  Therefore we leave
+    // the decision of whether or not to use rule (3) to
+    // implementors."
+
+
+//    {
+//        //auto currIter = rexmitQueue->searchSackBlock(state->highRxt);
+//        for (uint32_t s3 = state->highRxt;
+//             seqLess(s3, state->snd_max) && seqLess(s3, highestSackedSeqNum);
+//             s3 += shift)
+//        {
+//            //rexmitQueue->checkSackBlockIter(s3, shift, sacked, rexmitted, currIter);
+//            rexmitQueue->checkSackBlock(s3, shift, sacked, rexmitted);
+//
+//            if (!sacked) {
+//                // 1.a and 1.b are true, see above "for" statement
+//                seqNum = s3;
+//                return true;
+//            }
+//        }
+//    }
+    if(isSeqPerRule3Valid)
+    {
+        seqNum = seqPerRule3;
+        return true;
+    }
+    // RFC 3517, page 6: "(4) If the conditions for each of (1), (2), and (3) are not met,
+    // then NextSeg () MUST indicate failure, and no segment is
+    // returned."
+    seqNum = 0;
+
+    return false;
+}
+
 void TcpPacedConnection::retransmitNext(bool timeout) {
     retransmitOnePacket = true;
     retransmitAfterTimeout = timeout;
