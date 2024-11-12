@@ -47,6 +47,8 @@ protected:
 
     virtual TcpEventCode process_RCV_SEGMENT(Packet *tcpSegment, const Ptr<const TcpHeader>& tcpHeader, L3Address src, L3Address dest) override;
 
+    virtual void enqueueData();
+
 public:
     virtual bool processTimer(cMessage *msg) override;
     virtual bool sendData(uint32_t congestionWindow) override;

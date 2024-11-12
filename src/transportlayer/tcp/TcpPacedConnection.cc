@@ -242,7 +242,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
         // acked data no longer needed in send queue
 
         sendQueue->discardUpTo(discardUpToSeq);
-
+        enqueueData();
         // acked data no longer needed in rexmit queue
         if (state->sack_enabled){
             rexmitQueue->discardUpTo(discardUpToSeq);
@@ -756,5 +756,13 @@ simtime_t TcpPacedConnection::getPacingRate() {
 void TcpPacedConnection::cancelPaceTimer() {
     cancelEvent(paceMsg);
 }
+
+void TcpPacedConnection::enqueueData() {
+    Packet *msg = new Packet("Packet");
+    const auto & bytes = makeShared<ByteCountChunk>(B(1447));
+    msg->insertAtBack(bytes);
+    sendQueue->enqueueAppData(msg);
+}
+
 }
 }
