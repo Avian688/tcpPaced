@@ -42,7 +42,7 @@ bool TcpPacedFamily::sendData(bool sendCommandInvoked)
         if ((simTime() - state->time_last_data_sent) > state->rexmit_timeout) {
             // RFC 5681, page 11: "For the purposes of this standard, we define RW = min(IW,cwnd)."
             if (state->increased_IW_enabled)
-                state->snd_cwnd = state->snd_mss;
+                state->snd_cwnd = state->snd_mss*4;
             else
                 state->snd_cwnd = state->snd_mss;
 
@@ -50,8 +50,8 @@ bool TcpPacedFamily::sendData(bool sendCommandInvoked)
         }
     }
 
-    if(state->snd_cwnd < state->snd_mss){
-        state->snd_cwnd = state->snd_mss;
+    if(state->snd_cwnd < state->snd_mss*4){
+        state->snd_cwnd = state->snd_mss*4;
     }
     //
     // Send window is effectively the minimum of the congestion window (cwnd)
