@@ -64,6 +64,10 @@ public:
 
     virtual void sendPendingData();
 
+    virtual void setAllSackedLost();
+
+    virtual void setSackedHeadLost();
+
     virtual void retransmitNext(bool timeout);
 
     virtual void computeThroughput();

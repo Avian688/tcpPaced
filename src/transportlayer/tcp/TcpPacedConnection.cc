@@ -518,7 +518,6 @@ void TcpPacedConnection::retransmitOneSegment(bool called_at_rto)
     // rfc-3168, page 20:
     // ECN-capable TCP implementations MUST NOT set either ECT codepoint
     // (ECT(0) or ECT(1)) in the IP header for retransmitted data packets
-
     if (state && state->ect)
         state->rexmit = true;
 
@@ -531,6 +530,8 @@ void TcpPacedConnection::retransmitOneSegment(bool called_at_rto)
     uint32_t bytes = std::min(std::min(state->snd_mss, state->snd_max - state->snd_nxt),
                 sendQueue->getBytesAvailable(state->snd_nxt));
 
+    //std::cout << "\n RETRANSMITTING ONE SEGMENT OF " << bytes << " BYTES AT SIMTIME: " << simTime() << endl;
+    //std::cout << "\n CURRENT IN FLIGHT IS " << state->pipe << endl;
     // FIN (without user data) needs to be resent
     if (bytes == 0 && state->send_fin && state->snd_fin_seq == sendQueue->getBufferEndSeq()) {
         state->snd_max = sendQueue->getBufferEndSeq();
@@ -564,6 +565,8 @@ void TcpPacedConnection::retransmitOneSegment(bool called_at_rto)
         }
     }
 
+    //std::cout << "\n AT END OF METHOD IN FLIGHT IS " << state->pipe << endl;
+
     if (state && state->ect)
         state->rexmit = false;
 }
@@ -588,8 +591,8 @@ void TcpPacedConnection::setPipe() {
         if (!sacked) {
             //if (isLost(s1) == false){
             const std::tuple<bool, bool> item = rexmitQueue->getLostAndRetransmitted(s1);
-            bool isLost = std::get<0>(item);
-            bool isRetans = std::get<1>(item);
+            bool isLost = std::get<0>(item); // @suppress("Function cannot be instantiated")
+            bool isRetans = std::get<1>(item); // @suppress("Function cannot be instantiated")
             if(!isLost || isRetans) {
                 currentInFlight += length;
             }
@@ -752,19 +755,22 @@ bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
     return false;
 }
 
-void TcpPacedConnection::retransmitNext(bool timeout) {
+void TcpPacedConnection::retransmitNext(bool timeout)
+{
     retransmitOnePacket = true;
     retransmitAfterTimeout = timeout;
 }
 
-void TcpPacedConnection::computeThroughput() {
+void TcpPacedConnection::computeThroughput()
+{
     EV_TRACE << "Bytes received since last measurement: " << bytesRcvd - lastBytesReceived << "B. Time elapsed since last time measured: " << simTime() - lastThroughputTime << std::endl;
     currThroughput = (bytesRcvd - lastBytesReceived) * 8 / (simTime().dbl() - lastThroughputTime.dbl());
     EV_TRACE << "Throughput computed from application: " << currThroughput << std::endl;
     emit(throughputSignal, currThroughput);
 }
 
-simtime_t TcpPacedConnection::getPacingRate() {
+simtime_t TcpPacedConnection::getPacingRate()
+{
     return intersendingTime;
 }
 
@@ -772,11 +778,38 @@ void TcpPacedConnection::cancelPaceTimer() {
     cancelEvent(paceMsg);
 }
 
-void TcpPacedConnection::enqueueData() {
+void TcpPacedConnection::enqueueData()
+{
     Packet *msg = new Packet("Packet");
     const auto & bytes = makeShared<ByteCountChunk>(B(1447));
     msg->insertAtBack(bytes);
     sendQueue->enqueueAppData(msg);
+}
+
+void TcpPacedConnection::setSackedHeadLost()
+{
+    if(!rexmitQueue->checkHeadIsLost()){
+        rexmitQueue->markHeadAsLost();
+    }
+}
+
+void TcpPacedConnection::setAllSackedLost()
+{
+    // From RFC 6675, Section 5.1
+   // [RFC2018] suggests that a TCP sender SHOULD expunge the SACK
+   // information gathered from a receiver upon a retransmission timeout
+   // (RTO) "since the timeout might indicate that the data receiver has
+   // reneged."  Additionally, a TCP sender MUST "ignore prior SACK
+   // information in determining which data to retransmit."
+   // It has been suggested that, as long as robust tests for
+   // reneging are present, an implementation can retain and use SACK
+   // information across a timeout event [Errata1610].
+   // The head of the sent list will not be marked as sacked, therefore
+   // will be retransmitted, if the receiver renegotiate the SACK blocks
+   // that we received.
+
+    rexmitQueue->setAllLost();
+    state->highRxt = rexmitQueue->getHighestRexmittedSeqNum();
 }
 
 }
