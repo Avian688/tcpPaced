@@ -257,7 +257,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
             // in the receivedDataAck we need the old value
             state->dupacks = 0;
             emit(dupAcksSignal, state->dupacks);
-            //tcpAlgorithm->restartRexmitTimer();
+            tcpAlgorithm->restartRexmitTimer();
         }
     }
     else {
