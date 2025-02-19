@@ -33,6 +33,15 @@ simple TcpPacedConnection extends TcpConnection
         @signal[highRxt];
         @signal[throughput];
         
+        @signal[mDelivered];
+        @signal[mFirstSentTime]; 
+        @signal[mLastSentTime]; 
+        @signal[mbytesInFlight]; 
+        @signal[mbytesInFlightTotal]; 
+        @signal[mbytesLoss]; 
+        @signal[msendElapsed]; 
+        @signal[mackElapsed];
+        
         @statistic[throughput](record=vector; interpolationmode=sample-hold);
         @statistic[additiveIncrease](record=vector; interpolationmode=sample-hold);
         @statistic[state](record=vector; interpolationmode=sample-hold);
@@ -40,4 +49,13 @@ simple TcpPacedConnection extends TcpConnection
         @statistic[recover](record=vector; interpolationmode=sample-hold);
         @statistic[lossRecovery](record=vector; interpolationmode=sample-hold);
         @statistic[highRxt](record=vector; interpolationmode=sample-hold);
+        
+        @statistic[mDelivered](record=vector; interpolationmode=sample-hold);
+		@statistic[mFirstSentTime](record=vector; interpolationmode=sample-hold);
+		@statistic[mLastSentTime](record=vector; interpolationmode=sample-hold);
+		@statistic[mbytesInFlight](record=vector; interpolationmode=sample-hold);
+		@statistic[mbytesInFlightTotal](record=vector; interpolationmode=sample-hold);
+		@statistic[mbytesLoss](record=vector; interpolationmode=sample-hold);
+		@statistic[msendElapsed](record=vector; interpolationmode=sample-hold);
+		@statistic[mackElapsed](record=vector; interpolationmode=sample-hold);
 }

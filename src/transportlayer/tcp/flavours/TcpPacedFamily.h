@@ -30,10 +30,13 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
     /** Ctor */
     TcpPacedFamily();
 
-    virtual bool sendData(bool sendCommandInvoked);
+    virtual bool sendData(bool sendCommandInvoked) override;
 
     virtual uint32_t getCwnd() { return state->snd_cwnd;};
 
+  protected:
+
+    virtual void processRexmitTimer(TcpEventCode& event) override;
 };
 
 } // namespace tcp

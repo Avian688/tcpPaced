@@ -28,10 +28,11 @@ PROJECTRELATIVE_PATH = src
 O = $(PROJECT_OUTPUT_DIR)/$(CONFIGNAME)/$(PROJECTRELATIVE_PATH)
 
 # Object files for local .cc, .msg and .sm files
-OBJS = $O/transportlayer/tcp/TcpPaced.o $O/transportlayer/tcp/TcpPacedConnection.o $O/transportlayer/tcp/flavours/TcpPacedFamily.o
+OBJS = $O/transportlayer/tcp/TcpPaced.o $O/transportlayer/tcp/TcpPacedConnection.o $O/transportlayer/tcp/flavours/TcpPacedFamily.o $O/transportlayer/tcp/SkbInfo_m.o
 
 # Message files
-MSGFILES =
+MSGFILES = \
+    transportlayer/tcp/SkbInfo.msg
 
 # SM files
 SMFILES =

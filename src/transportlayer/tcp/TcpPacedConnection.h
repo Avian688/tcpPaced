@@ -26,7 +26,7 @@
 #include <inet/networklayer/common/TosTag_m.h>
 #include <inet/networklayer/common/L3AddressTag_m.h>
 #include <inet/networklayer/contract/IL3AddressType.h>
-
+#include "SkbInfo_m.h"
 #include "flavours/TcpPacedFamily.h"
 
 namespace inet {
@@ -35,6 +35,28 @@ namespace tcp {
 class TcpPacedConnection : public TcpConnection {
 public:
     static simsignal_t throughputSignal;
+    static simsignal_t mDeliveredSignal;
+    static simsignal_t mFirstSentTimeSignal;
+    static simsignal_t mLastSentTimeSignal;
+    static simsignal_t msendElapsedSignal;
+    static simsignal_t mackElapsedSignal;
+    static simsignal_t mbytesInFlightSignal;
+    static simsignal_t mbytesInFlightTotalSignal;
+    static simsignal_t mbytesLossSignal;
+
+    struct RateSample {
+      uint32_t m_deliveryRate;
+      bool m_isAppLimited;
+      simtime_t m_interval;
+      uint32_t m_delivered;
+      uint32_t m_priorDelivered;
+      simtime_t m_priorTime;
+      simtime_t m_sendElapsed;
+      simtime_t m_ackElapsed;
+      uint32_t m_bytesLoss;
+      uint32_t m_priorInFlight;
+      uint32_t m_ackedSacked;
+      };
 
     TcpPacedConnection();
     virtual ~TcpPacedConnection();
@@ -42,16 +64,30 @@ protected:
     virtual bool processAckInEstabEtc(Packet *tcpSegment, const Ptr<const TcpHeader>& tcpHeader) override;
 
     virtual void initConnection(TcpOpenCommand *openCmd) override;
+
     virtual void initClonedConnection(TcpConnection *listenerConn) override;
+
+    virtual void configureStateVariables() override;
+
     virtual TcpConnection *cloneListeningConnection() override;
 
     virtual TcpEventCode process_RCV_SEGMENT(Packet *tcpSegment, const Ptr<const TcpHeader>& tcpHeader, L3Address src, L3Address dest) override;
 
     virtual void enqueueData();
 
+    virtual void updateSample(uint32_t delivered, uint32_t lost, bool is_sack_reneg, uint32_t priorInFlight, simtime_t minRtt);
+
+    virtual void calculateAppLimited();
+
+    virtual bool processSACKOption(const Ptr<const TcpHeader>& tcpHeader, const TcpOptionSack& option) override;
+
 public:
     virtual bool processTimer(cMessage *msg) override;
+
     virtual bool sendData(uint32_t congestionWindow) override;
+
+    virtual uint32_t sendSegment(uint32_t bytes) override;
+
     virtual void changeIntersendingTime(simtime_t _intersendingTime);
 
     virtual simtime_t getPacingRate();
@@ -59,6 +95,7 @@ public:
     virtual void retransmitOneSegment(bool called_at_rto) override;
 
     virtual bool sendDataDuringLossRecovery(uint32_t congestionWindow);
+
 
     virtual void cancelPaceTimer();
 
@@ -72,9 +109,35 @@ public:
 
     virtual void computeThroughput();
 
-    virtual void setPipe() override;
-
     virtual bool nextSeg(uint32_t& seqNum, bool isRecovery);
+
+    virtual bool checkIsLost(uint32_t seqNo);
+
+    virtual uint32_t getHighestRexmittedSeqNum();
+
+    virtual void skbDelivered(uint32_t seqNum);
+
+    virtual void updateInFlight();
+
+    virtual void setPipe() override {};
+
+    virtual simtime_t getFirstSent() {return m_firstSentTime;};
+
+    virtual simtime_t getDeliveredTime() {return m_deliveredTime;};
+
+    virtual uint32_t getDelivered() {return m_delivered;};
+
+    virtual RateSample getRateSample() {return m_rateSample;};
+
+    virtual uint32_t getBytesInFlight() {return m_bytesInFlight;};
+
+    virtual simtime_t getMinRtt() {return connMinRtt;};
+
+    virtual void setMinRtt(simtime_t rtt) { connMinRtt = rtt;};
+
+    virtual uint32_t getLastAckedSackedBytes() {return m_lastAckedSackedBytes;};
+
+    virtual void addSkbInfoTags(const Ptr<TcpHeader> &tcpHeader, uint32_t payloadBytes);
 protected:
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;
@@ -94,6 +157,30 @@ protected:
 
     uint32_t currThroughput;
 
+
+    uint32_t m_lastAckedSackedBytes;
+
+   uint32_t m_delivered;
+   simtime_t m_deliveredTime;
+   uint32_t m_rateDelivered;
+   simtime_t m_rateInterval;
+   simtime_t m_firstSentTime;
+
+   RateSample m_rateSample;
+   uint32_t m_bytesInFlight;
+   uint32_t m_bytesLoss;
+
+   uint32_t m_sentSize;
+   uint32_t m_sackedOut;
+   uint32_t m_lostOut;
+   uint32_t m_retrans;
+
+
+   uint32_t m_appLimited; //NOT NEEDED
+   bool m_rateAppLimited; //NOT NEEDED
+   bool m_txItemDelivered; //NOT NEEDED
+
+   simtime_t connMinRtt = SIMTIME_MAX;
 public:
     cMessage *paceMsg;
     cMessage *throughputTimer;

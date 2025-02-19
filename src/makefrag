@@ -1,0 +1,34 @@
+#
+# Use the new message compiler introduced in OMNeT++ 5.3
+#
+MSGC:=$(MSGC) --msg6
+
+FEATURETOOL := opp_featuretool
+
+#
+# compiler warning for c-style cast
+#
+#CFLAGS += -Wold-style-cast
+
+ifeq ($(PLATFORM),win32)
+  #
+  # on windows we have to link with the ws2_32 (winsock2) library as it is no longer added
+  # to the omnetpp system libraries by default (as of OMNeT++ 5.1)
+  #
+  LDFLAGS += -lws2_32
+  DEFINES += -DINET_EXPORT
+endif
+
+# disable anoying "... hides overloaded virtual function" warning
+CFLAGS += -Wno-overloaded-virtual
+
+#########################################################################
+# precompiled header support for GCC and CLANG
+# dump out the actual compiler and linker command line for easier debugging
+ifneq ($(MAKECMDGOALS),clean)
+$(info *** COMPILING with:)
+$(info $(CXX) -c $(CXXFLAGS) $(COPTS))
+$(info *** LINKING with:)
+$(info $(SHLIB_LD) -o $O/$(TARGET) $(AS_NEEDED_OFF) $(WHOLE_ARCHIVE_ON) $(LIBS) $(WHOLE_ARCHIVE_OFF) $(OMNETPP_LIBS) $(LDFLAGS))
+$(info Building...)
+endif

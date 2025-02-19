@@ -11,16 +11,20 @@
 // 
 // You should have received a copy of the GNU Lesser General Public License
 // along with this program.  If not, see http://www.gnu.org/licenses/.
-// 
+//
 
-package tcppaced.transportlayer.tcp;
+import inet.common.INETDefs;
+import inet.common.TagBase;
+import inet.common.Units;
 
-import inet.transportlayer.tcp.Tcp;
+namespace inet;
 
-simple TcpPaced extends Tcp
+class SkbInfo extends TagBase
 {
-    parameters:
-        @class("inet::tcp::TcpPaced");
-        
-        double throughputInterval @unit(s) = default(1s);
+    uint32_t delivered;
+    simtime_t firstSent;
+    simtime_t lastSent;
+    simtime_t deliveredTime;
+    uint32_t payloadBytes;
+    bool isAppLimited;
 }
