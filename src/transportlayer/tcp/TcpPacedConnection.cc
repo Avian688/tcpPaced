@@ -54,6 +54,7 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
 {
     TcpConnection::initConnection(openCmd);
 
+    m_delivered = 0;
     throughputInterval = 0;
     paceMsg = new cMessage("pacing message");
     throughputTimer = new cMessage("throughputTimer");
@@ -66,12 +67,36 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
     prevLastBytesReceived = 0;
     currThroughput = 0;
     pace = true;
+    m_appLimited = false;
+    m_rateAppLimited = false;
+    m_txItemDelivered = false;
+
+    m_bytesInFlight = 0;
+    m_bytesLoss = 0;
 
     lastThroughputTime = simTime();
     prevLastThroughputTime = simTime();
 
     m_firstSentTime = simTime();
     m_deliveredTime = simTime();
+
+    m_rateInterval = 0;
+    m_rateDelivered = 0;
+
+    m_lastAckedSackedBytes = 0;
+    bytesRcvd = 0;
+
+    m_rateSample.m_ackElapsed = 0;
+    m_rateSample.m_ackedSacked = 0;
+    m_rateSample.m_bytesLoss = 0;
+    m_rateSample.m_delivered = 0;
+    m_rateSample.m_deliveryRate = 0;
+    m_rateSample.m_interval = 0;
+    m_rateSample.m_isAppLimited = false;
+    m_rateSample.m_priorDelivered = 0;
+    m_rateSample.m_priorInFlight = 0;
+    m_rateSample.m_priorTime = 0;
+    m_rateSample.m_sendElapsed = 0;
 }
 
 TcpConnection *TcpPacedConnection::cloneListeningConnection()

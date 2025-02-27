@@ -1,4 +1,4 @@
-//
+            //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
 // the Free Software Foundation, either version 3 of the License, or
@@ -160,27 +160,21 @@ protected:
 
     uint32_t m_lastAckedSackedBytes;
 
-   uint32_t m_delivered;
-   simtime_t m_deliveredTime;
-   uint32_t m_rateDelivered;
-   simtime_t m_rateInterval;
-   simtime_t m_firstSentTime;
+    uint32_t m_delivered;
+    simtime_t m_deliveredTime;
+    uint32_t m_rateDelivered;
+    simtime_t m_rateInterval;
+    simtime_t m_firstSentTime;
 
-   RateSample m_rateSample;
-   uint32_t m_bytesInFlight;
-   uint32_t m_bytesLoss;
+    RateSample m_rateSample;
+    uint32_t m_bytesInFlight;
+    uint32_t m_bytesLoss;
 
-   uint32_t m_sentSize;
-   uint32_t m_sackedOut;
-   uint32_t m_lostOut;
-   uint32_t m_retrans;
+    uint32_t m_appLimited; //NOT NEEDED
+    bool m_rateAppLimited; //NOT NEEDED
+    bool m_txItemDelivered; //NOT NEEDED
 
-
-   uint32_t m_appLimited; //NOT NEEDED
-   bool m_rateAppLimited; //NOT NEEDED
-   bool m_txItemDelivered; //NOT NEEDED
-
-   simtime_t connMinRtt = SIMTIME_MAX;
+    simtime_t connMinRtt = SIMTIME_MAX;
 public:
     cMessage *paceMsg;
     cMessage *throughputTimer;
