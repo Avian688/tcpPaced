@@ -21,10 +21,10 @@ namespace inet;
 
 class SkbInfo extends TagBase
 {
-    uint32_t delivered;
-    simtime_t firstSent;
-    simtime_t lastSent;
-    simtime_t deliveredTime;
-    uint32_t payloadBytes;
-    bool isAppLimited;
+    uint32_t delivered = 0;
+    simtime_t firstSent = 0;
+    simtime_t lastSent = 0;
+    simtime_t deliveredTime = 0;
+    uint32_t payloadBytes = 0;
+    bool isAppLimited = false;
 }

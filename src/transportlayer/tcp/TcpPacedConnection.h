@@ -127,6 +127,8 @@ public:
 
     virtual uint32_t getDelivered() {return m_delivered;};
 
+    virtual uint32_t getTxItemDelivered() {return m_txItemDelivered;};
+
     virtual RateSample getRateSample() {return m_rateSample;};
 
     virtual uint32_t getBytesInFlight() {return m_bytesInFlight;};
@@ -172,7 +174,7 @@ protected:
 
     uint32_t m_appLimited; //NOT NEEDED
     bool m_rateAppLimited; //NOT NEEDED
-    bool m_txItemDelivered; //NOT NEEDED
+    uint32_t m_txItemDelivered; //NOT NEEDED
 
     simtime_t connMinRtt = SIMTIME_MAX;
 public:

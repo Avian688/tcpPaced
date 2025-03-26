@@ -69,7 +69,7 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
     pace = true;
     m_appLimited = false;
     m_rateAppLimited = false;
-    m_txItemDelivered = false;
+    m_txItemDelivered = 0;
 
     m_bytesInFlight = 0;
     m_bytesLoss = 0;
@@ -638,12 +638,12 @@ void TcpPacedConnection::sendPendingData()
             }
         }
         else{
-            if(retransmitOnePacket){
-                retransmitOneSegment(retransmitAfterTimeout);
-                retransmitOnePacket = false;
-                retransmitAfterTimeout = false;
-                dataSent = false; // We shouldnt pace to retransmissions!
-            }
+//            if(retransmitOnePacket){
+//                retransmitOneSegment(retransmitAfterTimeout);
+//                retransmitOnePacket = false;
+//                retransmitAfterTimeout = false;
+//                dataSent = false; // We shouldnt pace to retransmissions!
+//            }
         }
     }
 }
