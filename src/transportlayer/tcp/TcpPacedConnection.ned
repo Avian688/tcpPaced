@@ -26,6 +26,7 @@ simple TcpPacedConnection extends TcpConnection
         @signal[minRtt];
         @signal[state];
         @signal[pacingGain];
+        @signal[paceRate];
         
         @signal[roundCount];
         @signal[recover];
@@ -46,6 +47,7 @@ simple TcpPacedConnection extends TcpConnection
         @statistic[additiveIncrease](record=vector; interpolationmode=sample-hold);
         @statistic[state](record=vector; interpolationmode=sample-hold);
         @statistic[pacingGain](record=vector; interpolationmode=sample-hold);
+        @statistic[paceRate](record=vector; interpolationmode=sample-hold);
         @statistic[recover](record=vector; interpolationmode=sample-hold);
         @statistic[lossRecovery](record=vector; interpolationmode=sample-hold);
         @statistic[highRxt](record=vector; interpolationmode=sample-hold);

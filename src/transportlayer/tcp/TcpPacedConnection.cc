@@ -28,6 +28,8 @@ Define_Module(TcpPacedConnection);
 
 simsignal_t TcpPacedConnection::throughputSignal = registerSignal("throughput");
 
+simsignal_t TcpPacedConnection::paceRateSignal = registerSignal("paceRate");
+
 simsignal_t TcpPacedConnection::mDeliveredSignal = registerSignal("mDelivered");
 simsignal_t TcpPacedConnection::mFirstSentTimeSignal = registerSignal("mFirstSentTime");
 simsignal_t TcpPacedConnection::mLastSentTimeSignal = registerSignal("mLastSentTime");
@@ -482,13 +484,14 @@ bool TcpPacedConnection::sendData(uint32_t congestionWindow)
 
     emit(unackedSignal, state->snd_max - state->snd_una);
 
+    std::cout << "\n send data being called!" << endl;
     // notify (once is enough)
     tcpAlgorithm->ackSent();
 
     if (state->sack_enabled && state->lossRecovery && old_highRxt != state->highRxt) {
         // Note: Restart of REXMIT timer on retransmission is not part of RFC 2581, however optional in RFC 3517 if sent during recovery.
         EV_DETAIL << "Retransmission sent during recovery, restarting REXMIT timer.\n";
-        //tcpAlgorithm->restartRexmitTimer();
+        tcpAlgorithm->restartRexmitTimer();
     }
     else // don't measure RTT for retransmitted packets
         tcpAlgorithm->dataSent(old_snd_nxt);
@@ -498,7 +501,6 @@ bool TcpPacedConnection::sendData(uint32_t congestionWindow)
 
 uint32_t TcpPacedConnection::sendSegment(uint32_t bytes)
 {
-    updateInFlight();
     // FIXME check it: where is the right place for the next code (sacked/rexmitted)
     if (state->sack_enabled && state->afterRto) {
         // check rexmitQ and try to forward snd_nxt before sending new data
@@ -558,6 +560,10 @@ uint32_t TcpPacedConnection::sendSegment(uint32_t bytes)
 
     state->snd_nxt += bytes;
 
+    if(state->snd_nxt == 2904339){
+        std::cout << "\n Sending that packet at simtime: " << simTime() << endl;;
+    }
+
     // check if afterRto bit can be reset
     if (state->afterRto && seqGE(state->snd_nxt, state->snd_max))
         state->afterRto = false;
@@ -614,36 +620,24 @@ void TcpPacedConnection::sendPendingData()
     if(pace){
         bool dataSent = false;
         if (!paceMsg->isScheduled()){
-            if(!retransmitOnePacket){
-                if(state->lossRecovery){
-                    dataSent = sendDataDuringLossRecovery(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
-                    if(!dataSent){
-                        dataSent = sendDataDuringLossRecovery(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
-                    }
-                }
-                else{
-                    dataSent = sendDataDuringLossRecovery(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
-                }
+            if(state->lossRecovery){
+                dataSent = sendDataDuringLossRecovery(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
+                //dataSent = sendSegment(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
+    //                    if(!dataSent){
+    //                        dataSent = sendSegment(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
+    //                    }
             }
             else{
-                retransmitOneSegment(retransmitAfterTimeout);
-                retransmitOnePacket = false;
-                retransmitAfterTimeout = false;
-                dataSent = true; // We shouldnt pace to retransmissions!
+                dataSent = sendDataDuringLossRecovery(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
             }
 
             if(dataSent){
-                paceStart = simTime();
-                scheduleAfter(intersendingTime, paceMsg);
+                EV_INFO << "sendPendingData: Data sent! Scheduling pacing timer for " << simTime() + intersendingTime << "\n";
+                scheduleAt(simTime() + intersendingTime, paceMsg);
             }
-        }
-        else{
-//            if(retransmitOnePacket){
-//                retransmitOneSegment(retransmitAfterTimeout);
-//                retransmitOnePacket = false;
-//                retransmitAfterTimeout = false;
-//                dataSent = false; // We shouldnt pace to retransmissions!
-//            }
+            else{
+                EV_INFO << "sendPendingData: no data sent!"  << "\n";
+            }
         }
     }
 }
@@ -659,9 +653,9 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
     // segments as follows:
     // (...)
     // (C.5) If cwnd - pipe >= 1 SMSS, return to (C.1)"
-    uint32_t maxWindow = std::min(state->snd_wnd, congestionWindow);
-    if((((int)state->pipe > maxWindow) ? 0 : maxWindow - (int)state->pipe) >= (int)state->snd_mss) {
-    //if (((int)congestionWindow - (int)state->pipe) >= (int)state->snd_mss) { // Note: Typecast needed to avoid prohibited transmissions
+    uint32_t availableWindow = (state->pipe > congestionWindow) ? 0 : congestionWindow - state->pipe;
+    std::cout << "\n AVAILABLE WINDOW: " << availableWindow << endl;
+    if (availableWindow >= (int)state->snd_mss) { // Note: Typecast needed to avoid prohibited transmissions
         // RFC 3517 pages 7 and 8: "(C.1) The scoreboard MUST be queried via NextSeg () for the
         // sequence number range of the next segment to transmit (if any),
         // and the given segment sent.  If NextSeg () returns failure (no
@@ -670,8 +664,10 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
 
         uint32_t seqNum;
 
-        if (!nextSeg(seqNum, state->lossRecovery)) // if nextSeg() returns false (=failure): terminate steps C.1 -- C.5
+        if (!nextSeg(seqNum, state->lossRecovery)){ // if nextSeg() returns false (=failure): terminate steps C.1 -- C.5
             return false;
+        }
+
 
         uint32_t sentBytes = sendSegmentDuringLossRecoveryPhase(seqNum);
 
@@ -687,7 +683,30 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
         // octets transmitted in (C.1)."
     }
     else{
+        //if(simTime() == 0.85764370298){
+            std::cout << "\n NOT SENDING BECAUSE OF:" << endl;
+            std::cout << "\n CWND: " << congestionWindow << endl;
+            std::cout << "\n PIPE: " << (int)state->pipe << endl;
+        //}
         return false;
+    }
+}
+
+void TcpPacedConnection::doRetransmit()
+{
+    uint32_t seqNum;
+
+    if (!nextSeg(seqNum, state->lossRecovery)){ // if nextSeg() returns false (=failure): terminate steps C.1 -- C.5
+        return;
+    }
+
+    uint32_t sentBytes = sendSegmentDuringLossRecoveryPhase(seqNum);
+
+    if(sentBytes > 0){
+        if(!paceMsg->isScheduled()){
+            paceStart = simTime();
+            scheduleAt(simTime() + intersendingTime, paceMsg);
+        }
     }
 }
 
@@ -701,6 +720,7 @@ void TcpPacedConnection::changeIntersendingTime(simtime_t _intersendingTime)
             intersendingTime = _intersendingTime;
             EV_TRACE << "New pace: " << intersendingTime << "s\n";
             paceValueVec.record(intersendingTime);
+            emit(paceRateSignal, ((1/intersendingTime)*state->snd_mss)/125000);
         }
     }
 }
@@ -772,7 +792,6 @@ bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
     // sequence number range of the next segment that is to be
     // transmitted, per the following rules:"
 
-    rexmitQueue->updateLost(rexmitQueue->getHighestSackedSeqNum());
 
     state->highRxt = rexmitQueue->getHighestRexmittedSeqNum();// not needed?
     uint32_t highestSackedSeqNum = rexmitQueue->getHighestSackedSeqNum();
@@ -801,16 +820,18 @@ bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
     // Note: state->highRxt == RFC.HighRxt + 1
     uint32_t seqPerRule3 = 0;
     bool isSeqPerRule3Valid = false;
+
     for (uint32_t s2 = rexmitQueue->getBufferStartSeq();
-         seqLess(s2, rexmitQueue->getBufferEndSeq()) && seqLess(s2, highestSackedSeqNum);
+         seqLess(s2, state->snd_max) && seqLess(s2, highestSackedSeqNum);
          s2 += shift)
     {
         //rexmitQueue->checkSackBlockIter(s2, shift, sacked, rexmitted, currIter);
         rexmitQueue->checkSackBlockLost(s2, shift, sacked, rexmitted, lost);
 
-        if (!rexmitted && !sacked) {
+        EV_INFO << "checkSackBlockLost: s2: " << s2 << " shift: " << shift << " sacked: " << sacked << " rexmitted: " << rexmitted << " lost: " << lost << "\n";
+        if (!sacked) {
             //if (isLost(s2)) { // 1.a and 1.b are true, see above "for" statement
-            if(lost) {
+            if(lost && !rexmitted) {
                 //std::cout << "\n HIGHEST SACKED SEQ NUM: " << highestSackedSeqNum << endl;
                 //std::cout << "\n FOUND LOST PACKET: " << s2 << endl;
                 seqNum = s2;
@@ -890,6 +911,7 @@ bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
 //        }
         if(isSeqPerRule3Valid)
         {
+            std::cout << "\n WEIRD EDGE CASE HAPPENING" << endl;
             seqNum = seqPerRule3;
             return true;
         }
@@ -907,12 +929,6 @@ bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
     seqNum = 0;
 
     return false;
-}
-
-void TcpPacedConnection::retransmitNext(bool timeout)
-{
-    retransmitOnePacket = true;
-    retransmitAfterTimeout = timeout;
 }
 
 void TcpPacedConnection::computeThroughput()
@@ -981,6 +997,9 @@ void TcpPacedConnection::skbDelivered(uint32_t seqNum)
         TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(seqNum);
         if(skbRegion.m_deliveredTime != SIMTIME_MAX){
             m_delivered += skbRegion.endSeqNum - skbRegion.beginSeqNum;
+            if((skbRegion.endSeqNum - skbRegion.beginSeqNum) != 1448){
+                std::cout << "\n AMOUNT DELIVERED" << skbRegion.endSeqNum - skbRegion.beginSeqNum << endl;
+            }
             m_deliveredTime = simTime();
 
             if (m_rateSample.m_priorDelivered == 0 || skbRegion.m_delivered > m_rateSample.m_priorDelivered)
@@ -1018,8 +1037,6 @@ void TcpPacedConnection::updateInFlight() {
     uint32_t length = 0; // required for rexmitQueue->checkSackBlock()
     bool sacked; // required for rexmitQueue->checkSackBlock()
     bool rexmitted; // required for rexmitQueue->checkSackBlock()
-
-    rexmitQueue->updateLost(rexmitQueue->getHighestSackedSeqNum());
 
     m_bytesInFlight = rexmitQueue->getInFlight();
     m_bytesLoss = rexmitQueue->getLost();
@@ -1169,15 +1186,21 @@ bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader
 //                for (uint32_t seqNo = tmp.getStart()+state->snd_mss; seqNo <= tmp.getEnd(); seqNo += state->snd_mss) {
 //                    skbDelivered(seqNo);
 //                }
+                std::list<uint32_t> skbDeliveredList = rexmitQueue->setSackedBitList(tmp.getStart(), tmp.getEnd());
+                for (uint32_t endSeqNo : skbDeliveredList) {
+                        skbDelivered(endSeqNo);
+                }
             }
             else
                 EV_DETAIL << "Received SACK below total cumulative ACK snd_una=" << state->snd_una << "\n";
 
-            std::list<uint32_t> skbDeliveredList = rexmitQueue->setSackedBitList(tmp.getStart(), tmp.getEnd());
-
-            for (uint32_t endSeqNo : skbDeliveredList) {
-                    skbDelivered(endSeqNo);
-            }
+//            if (seqGreater(tmp.getEnd(), tcpHeader->getAckNo()) && seqGreater(tmp.getEnd(), state->snd_una){
+//                std::list<uint32_t> skbDeliveredList = rexmitQueue->setSackedBitList(tmp.getStart(), tmp.getEnd());
+//            }
+//
+//            for (uint32_t endSeqNo : skbDeliveredList) {
+//                    skbDelivered(endSeqNo);
+//            }
 //            for (uint32_t seqNo = tmp.getStart()+state->snd_mss; seqNo <= tmp.getEnd(); seqNo += state->snd_mss) {
 //               skbDelivered(seqNo);
 //            }

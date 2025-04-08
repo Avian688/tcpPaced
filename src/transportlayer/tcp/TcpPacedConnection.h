@@ -43,6 +43,7 @@ public:
     static simsignal_t mbytesInFlightSignal;
     static simsignal_t mbytesInFlightTotalSignal;
     static simsignal_t mbytesLossSignal;
+    static simsignal_t paceRateSignal;
 
     struct RateSample {
       uint32_t m_deliveryRate;
@@ -96,6 +97,7 @@ public:
 
     virtual bool sendDataDuringLossRecovery(uint32_t congestionWindow);
 
+    virtual void doRetransmit();
 
     virtual void cancelPaceTimer();
 
@@ -104,8 +106,6 @@ public:
     virtual void setAllSackedLost();
 
     virtual void setSackedHeadLost();
-
-    virtual void retransmitNext(bool timeout);
 
     virtual void computeThroughput();
 
