@@ -245,26 +245,20 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
              simtime_t rtt = dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getRtt();
 
              // Get information of the latest packet (cumulatively)ACKed packet and update RACK parameters
-             if (!scoreboardUpdated)
-               {
-                 if(rexmitQueue->findRegion(tcpHeader->getAckNo())){
-                      TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(tcpHeader->getAckNo());
-                      m_rack->updateStats(tser, skbRegion.rexmitted, skbRegion.m_lastSentTime, tcpHeader->getAckNo(), state->snd_nxt, rtt);
-                  }
-                  else{
-                      TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(rexmitQueue->getBufferStartSeq()+1448);
-                      m_rack->updateStats(tser, skbRegion.rexmitted, skbRegion.m_lastSentTime, tcpHeader->getAckNo(), state->snd_nxt, rtt);
-                  }
-               }
-
-             // Get information of the latest packet (Selectively)ACKed packet and update RACK parameters
-             else
-               {
+             if (!scoreboardUpdated && rexmitQueue->findRegion(tcpHeader->getAckNo()))
+             {
+                 TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(tcpHeader->getAckNo());
+                 m_rack->updateStats(tser, skbRegion.rexmitted, skbRegion.m_lastSentTime, tcpHeader->getAckNo(), state->snd_nxt, rtt);
+             }
+             else // Get information of the latest packet (Selectively)ACKed packet and update RACK parameters
+             {
                  uint32_t highestSacked;
                  highestSacked = rexmitQueue->getHighestSackedSeqNum();
-                 TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(highestSacked);
-                 m_rack->updateStats(tser, skbRegion.rexmitted,  skbRegion.m_lastSentTime, highestSacked, state->snd_nxt, rtt);
-               }
+                 if(rexmitQueue->findRegion(highestSacked)){
+                     TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(highestSacked);
+                     m_rack->updateStats(tser, skbRegion.rexmitted,  skbRegion.m_lastSentTime, highestSacked, state->snd_nxt, rtt);
+                 }
+             }
 
              // Check if TCP will be exiting loss recovery
              bool exiting = false;
@@ -366,26 +360,20 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
           simtime_t rtt = dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getRtt();
 
           // Get information of the latest packet (cumulatively)ACKed packet and update RACK parameters
-          if (!scoreboardUpdated)
-            {
-              if(rexmitQueue->findRegion(tcpHeader->getAckNo())){
-                   TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(tcpHeader->getAckNo());
-                   m_rack->updateStats(tser, skbRegion.rexmitted, skbRegion.m_lastSentTime, tcpHeader->getAckNo(), state->snd_nxt, rtt);
-               }
-               else{
-                   TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(rexmitQueue->getBufferStartSeq()+1448);
-                   m_rack->updateStats(tser, skbRegion.rexmitted, skbRegion.m_lastSentTime, tcpHeader->getAckNo(), state->snd_nxt, rtt);
-               }
-            }
-
-          // Get information of the latest packet (Selectively)ACKed packet and update RACK parameters
-          else
-            {
+          if (!scoreboardUpdated && rexmitQueue->findRegion(tcpHeader->getAckNo()))
+          {
+              TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(tcpHeader->getAckNo());
+              m_rack->updateStats(tser, skbRegion.rexmitted, skbRegion.m_lastSentTime, tcpHeader->getAckNo(), state->snd_nxt, rtt);
+          }
+          else // Get information of the latest packet (Selectively)ACKed packet and update RACK parameters
+          {
               uint32_t highestSacked;
               highestSacked = rexmitQueue->getHighestSackedSeqNum();
-              TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(highestSacked);
-              m_rack->updateStats(tser, skbRegion.rexmitted,  skbRegion.m_lastSentTime, highestSacked, state->snd_nxt, rtt);
-            }
+              if(rexmitQueue->findRegion(highestSacked)){
+                  TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(highestSacked);
+                  m_rack->updateStats(tser, skbRegion.rexmitted,  skbRegion.m_lastSentTime, highestSacked, state->snd_nxt, rtt);
+              }
+          }
 
           // Check if TCP will be exiting loss recovery
           bool exiting = false;
