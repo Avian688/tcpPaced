@@ -34,6 +34,10 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
 
     virtual uint32_t getCwnd() { return state->snd_cwnd;};
 
+    virtual uint32_t getRecoveryPoint() { return state->recoveryPoint;};
+
+    virtual simtime_t getRtt() { return state->srtt;};
+
   protected:
 
     virtual void processRexmitTimer(TcpEventCode& event) override;

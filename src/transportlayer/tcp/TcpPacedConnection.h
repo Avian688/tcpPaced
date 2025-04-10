@@ -26,6 +26,7 @@
 #include <inet/networklayer/common/TosTag_m.h>
 #include <inet/networklayer/common/L3AddressTag_m.h>
 #include <inet/networklayer/contract/IL3AddressType.h>
+#include <inet/transportlayer/tcp/TcpRack.h>
 #include "SkbInfo_m.h"
 #include "flavours/TcpPacedFamily.h"
 
@@ -140,6 +141,10 @@ public:
     virtual uint32_t getLastAckedSackedBytes() {return m_lastAckedSackedBytes;};
 
     virtual void addSkbInfoTags(const Ptr<TcpHeader> &tcpHeader, uint32_t payloadBytes);
+
+    virtual bool checkFackLoss();
+
+    virtual bool checkRackLoss();
 protected:
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;
@@ -177,10 +182,21 @@ protected:
     uint32_t m_txItemDelivered; //NOT NEEDED
 
     simtime_t connMinRtt = SIMTIME_MAX;
+
+    //** ADDED FACK, DSACK, RACK VARIABLES **//
+    bool fack_enabled;
+    bool rack_enabled;
+    uint32_t m_sndFack;
+    bool m_reorder;
+    TcpRack *m_rack;
+    bool m_dsackSeen;
+
+    bool scoreboardUpdated;
 public:
     cMessage *paceMsg;
     cMessage *throughputTimer;
     simtime_t intersendingTime;
+    cMessage *rackTimer;
     double throughputInterval;
 
 };
