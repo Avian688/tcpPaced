@@ -273,8 +273,9 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 
             updateWndInfo(tcpHeader);
 
-            if (payloadLength == 0 && fsm.getState() != TCP_S_SYN_RCVD) {
-                skbDelivered(tcpHeader->getAckNo());
+            std::list<uint32_t> skbDeliveredList = rexmitQueue->getDiscardList(tcpHeader->getAckNo());
+            for (uint32_t endSeqNo : skbDeliveredList) {
+                skbDelivered(endSeqNo);
             }
 //
             uint32_t currentDelivered  = m_delivered - previousDelivered;
@@ -388,8 +389,9 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
         // acked data no longer needed in send queue
 
         // acked data no longer needed in rexmit queue
-        if (payloadLength == 0 && fsm.getState() != TCP_S_SYN_RCVD) {
-            skbDelivered(tcpHeader->getAckNo());
+        std::list<uint32_t> skbDeliveredList = rexmitQueue->getDiscardList(discardUpToSeq);
+        for (uint32_t endSeqNo : skbDeliveredList) {
+            skbDelivered(endSeqNo);
         }
 
         // acked data no longer needed in send queue
@@ -1127,6 +1129,7 @@ void TcpPacedConnection::skbDelivered(uint32_t seqNum)
         }
     }
     else{
+        std::cout << "\n SKB NOT FOUND" << endl;
         EV_DETAIL << "\n SkbDelivered cant find segment!: " << seqNum << endl;
         EV_DETAIL << rexmitQueue->str() << endl;
     }
