@@ -22,6 +22,9 @@
 #include <inet/transportlayer/tcp/TcpReceiveQueue.h>
 #include <inet/transportlayer/tcp/TcpSackRexmitQueue.h>
 #include <inet/transportlayer/tcp/TcpRack.h>
+
+#include "TcpPrrRecovery.h"
+
 namespace inet {
 namespace tcp {
 
@@ -58,6 +61,9 @@ TcpPacedConnection::~TcpPacedConnection() {
 void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
 {
     TcpConnection::initConnection(openCmd);
+
+    prrRecovery = new TcpPrrRecovery();
+    prrRecovery->setConnection(this);
 
     m_delivered = 0;
     throughputInterval = 0;
@@ -120,6 +126,8 @@ TcpConnection *TcpPacedConnection::cloneListeningConnection()
     sprintf(submoduleName, "conn-%d", newSocketId);
     auto conn = check_and_cast<TcpPacedConnection *>(moduleType->createScheduleInit(submoduleName, tcpMain));
     conn->TcpConnection::initConnection(tcpMain, newSocketId);
+    prrRecovery = new TcpPrrRecovery();
+    prrRecovery->setConnection(this);
     conn->initClonedConnection(this);
     return conn;
 }
@@ -138,7 +146,7 @@ void TcpPacedConnection::initClonedConnection(TcpConnection *listenerConn)
     retransmitAfterTimeout = false;
     lastBytesReceived = 0;
     prevLastBytesReceived = 0;
-
+    m_rack = new TcpRack();
 
     lastThroughputTime = simTime();
     prevLastThroughputTime = simTime();
@@ -261,13 +269,13 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
              }
 
              // Check if TCP will be exiting loss recovery
-             bool exiting = false;
-             if (state->lossRecovery && dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getRecoveryPoint() <= tcpHeader->getAckNo())
-               {
+            bool exiting = false;
+            if (state->lossRecovery && dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getRecoveryPoint() <= tcpHeader->getAckNo())
+            {
                  exiting = true;
-               }
+            }
 
-             m_rack->updateReoWnd(m_reorder, m_dsackSeen, state->snd_nxt, tcpHeader->getAckNo(), rexmitQueue->getTotalAmountOfSackedBytes(), 3, exiting, state->lossRecovery);
+            m_rack->updateReoWnd(m_reorder, m_dsackSeen, state->snd_nxt, tcpHeader->getAckNo(), rexmitQueue->getTotalAmountOfSackedBytes(), 3, exiting, state->lossRecovery);
             }
             scoreboardUpdated = false;
 
@@ -289,7 +297,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
             updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
 
             tcpAlgorithm->receivedDuplicateAck();
-
+            isRetransDataAcked = false;
             sendPendingData();
 
             m_reorder = false;
@@ -392,6 +400,11 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
         std::list<uint32_t> skbDeliveredList = rexmitQueue->getDiscardList(discardUpToSeq);
         for (uint32_t endSeqNo : skbDeliveredList) {
             skbDelivered(endSeqNo);
+            if(state->lossRecovery){
+                if(rexmitQueue->isRetransmittedDataAcked(endSeqNo)){
+                    isRetransDataAcked = true;
+                }
+            }
         }
 
         // acked data no longer needed in send queue
@@ -421,6 +434,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
             updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
 
             tcpAlgorithm->receivedDataAck(old_snd_una);
+            isRetransDataAcked = false;
             // in the receivedDataAck we need the old value
             state->dupacks = 0;
 

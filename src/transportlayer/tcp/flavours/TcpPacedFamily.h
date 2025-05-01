@@ -38,6 +38,8 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
 
     virtual simtime_t getRtt() { return state->srtt;};
 
+    virtual uint32_t getSsthresh() { return state->ssthresh;};
+
   protected:
 
     virtual void processRexmitTimer(TcpEventCode& event) override;

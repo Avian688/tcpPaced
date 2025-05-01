@@ -28,10 +28,13 @@
 #include <inet/networklayer/contract/IL3AddressType.h>
 #include <inet/transportlayer/tcp/TcpRack.h>
 #include "SkbInfo_m.h"
+
 #include "flavours/TcpPacedFamily.h"
 
 namespace inet {
 namespace tcp {
+
+class TcpPrrRecovery;
 
 class TcpPacedConnection : public TcpConnection {
 public:
@@ -134,6 +137,8 @@ public:
 
     virtual uint32_t getBytesInFlight() {return m_bytesInFlight;};
 
+    virtual uint32_t getIsRetransDataAcked() {return isRetransDataAcked;};
+
     virtual simtime_t getMinRtt() {return connMinRtt;};
 
     virtual void setMinRtt(simtime_t rtt) { connMinRtt = rtt;};
@@ -192,7 +197,11 @@ protected:
     bool m_dsackSeen;
 
     bool scoreboardUpdated;
+
+    bool isRetransDataAcked;
 public:
+    TcpPrrRecovery *prrRecovery;
+
     cMessage *paceMsg;
     cMessage *throughputTimer;
     simtime_t intersendingTime;
