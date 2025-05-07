@@ -812,12 +812,15 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
     return false;
 }
 
-void TcpPacedConnection::doRetransmit()
+bool TcpPacedConnection::doRetransmit()
 {
     uint32_t seqNum;
+    if(rexmitQueue->isRetransmittedDataAcked(state->snd_una+state->snd_mss)){
+        return false;
+    }
 
     if (!nextSeg(seqNum, state->lossRecovery)){ // if nextSeg() returns false (=failure): terminate steps C.1 -- C.5
-        return;
+        return false;
     }
 
     uint32_t sentBytes = sendSegmentDuringLossRecoveryPhase(seqNum);
@@ -827,7 +830,9 @@ void TcpPacedConnection::doRetransmit()
             paceStart = simTime();
             scheduleAt(simTime() + intersendingTime, paceMsg);
         }
+        return true;
     }
+    return false;
 }
 
 
@@ -1344,7 +1349,9 @@ bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader
 
         }
 
-        rexmitQueue->updateLost(rexmitQueue->getHighestSackedSeqNum());
+        if(rexmitQueue->updateLost(rexmitQueue->getHighestSackedSeqNum())){
+            dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->notifyLost();
+        }
         state->rcv_sacks += n; // total counter, no current number
 
         emit(rcvSacksSignal, state->rcv_sacks);
@@ -1388,7 +1395,10 @@ bool TcpPacedConnection::checkRackLoss()
 {
     double timeout = 0.0;
     bool enterRecovery = false;
-    rexmitQueue->checkRackLoss(m_rack, timeout);
+    if(rexmitQueue->checkRackLoss(m_rack, timeout)){
+        dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->notifyLost();
+    }
+
     if (rexmitQueue->getLost() != 0 && !state->lossRecovery)
     {
         enterRecovery = true;

@@ -40,6 +40,8 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
 
     virtual uint32_t getSsthresh() { return state->ssthresh;};
 
+    virtual void notifyLost(){};
+
   protected:
 
     virtual void processRexmitTimer(TcpEventCode& event) override;

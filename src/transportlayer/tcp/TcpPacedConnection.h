@@ -101,7 +101,7 @@ public:
 
     virtual bool sendDataDuringLossRecovery(uint32_t congestionWindow);
 
-    virtual void doRetransmit();
+    virtual bool doRetransmit();
 
     virtual void cancelPaceTimer();
 
