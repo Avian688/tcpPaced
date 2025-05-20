@@ -39,20 +39,9 @@ bool TcpPacedFamily::sendData(bool sendCommandInvoked)
     // Therefore, a TCP SHOULD set cwnd to no more than RW before beginning
     // transmission if the TCP has not sent data in an interval exceeding
     // the retransmission timeout."
-    if (!conn->isSendQueueEmpty()) { // do we have any data to send?
-        if ((simTime() - state->time_last_data_sent) > state->rexmit_timeout) {
-            // RFC 5681, page 11: "For the purposes of this standard, we define RW = min(IW,cwnd)."
-            if (state->increased_IW_enabled)
-                state->snd_cwnd = state->snd_mss*4;
-            else
-                state->snd_cwnd = state->snd_mss;
 
-            EV_INFO << "Restarting idle connection, CWND is set to " << state->snd_cwnd << "\n";
-        }
-    }
-
-    if(state->snd_cwnd < state->snd_mss*4){
-        state->snd_cwnd = state->snd_mss*4;
+    if(state->snd_cwnd < state->snd_mss){
+        state->snd_cwnd = state->snd_mss;
     }
     //
     // Send window is effectively the minimum of the congestion window (cwnd)

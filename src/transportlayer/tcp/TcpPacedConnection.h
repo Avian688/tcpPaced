@@ -34,8 +34,6 @@
 namespace inet {
 namespace tcp {
 
-class TcpPrrRecovery;
-
 class TcpPacedConnection : public TcpConnection {
 public:
     static simsignal_t throughputSignal;
@@ -150,6 +148,8 @@ public:
     virtual bool checkFackLoss();
 
     virtual bool checkRackLoss();
+
+    virtual uint32_t getTotalRetransmitted();
 protected:
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;
@@ -200,8 +200,6 @@ protected:
 
     bool isRetransDataAcked;
 public:
-    TcpPrrRecovery *prrRecovery;
-
     cMessage *paceMsg;
     cMessage *throughputTimer;
     simtime_t intersendingTime;

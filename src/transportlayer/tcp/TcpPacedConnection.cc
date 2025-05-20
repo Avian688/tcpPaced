@@ -23,8 +23,6 @@
 #include <inet/transportlayer/tcp/TcpSackRexmitQueue.h>
 #include <inet/transportlayer/tcp/TcpRack.h>
 
-#include "TcpPrrRecovery.h"
-
 namespace inet {
 namespace tcp {
 
@@ -61,9 +59,6 @@ TcpPacedConnection::~TcpPacedConnection() {
 void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
 {
     TcpConnection::initConnection(openCmd);
-
-    prrRecovery = new TcpPrrRecovery();
-    prrRecovery->setConnection(this);
 
     m_delivered = 0;
     throughputInterval = 0;
@@ -126,8 +121,6 @@ TcpConnection *TcpPacedConnection::cloneListeningConnection()
     sprintf(submoduleName, "conn-%d", newSocketId);
     auto conn = check_and_cast<TcpPacedConnection *>(moduleType->createScheduleInit(submoduleName, tcpMain));
     conn->TcpConnection::initConnection(tcpMain, newSocketId);
-    prrRecovery = new TcpPrrRecovery();
-    prrRecovery->setConnection(this);
     conn->initClonedConnection(this);
     return conn;
 }
@@ -686,10 +679,6 @@ uint32_t TcpPacedConnection::sendSegment(uint32_t bytes)
 
     state->snd_nxt += bytes;
 
-    if(state->snd_nxt == 2904339){
-        std::cout << "\n Sending that packet at simtime: " << simTime() << endl;;
-    }
-
     // check if afterRto bit can be reset
     if (state->afterRto && seqGE(state->snd_nxt, state->snd_max))
         state->afterRto = false;
@@ -707,7 +696,6 @@ uint32_t TcpPacedConnection::sendSegment(uint32_t bytes)
             rexmitQueue->skbSent(state->snd_nxt, m_firstSentTime, simTime(), m_deliveredTime, false, m_delivered, m_appLimited);
         }
     }
-
     // add header options and update header length (from tcpseg_temp)
     for (uint i = 0; i < tmpTcpHeader->getHeaderOptionArraySize(); i++)
         tcpHeader->appendHeaderOption(tmpTcpHeader->getHeaderOption(i)->dup());
@@ -794,7 +782,6 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
         if (!nextSeg(seqNum, state->lossRecovery)){ // if nextSeg() returns false (=failure): terminate steps C.1 -- C.5
             return false;
         }
-
 
         uint32_t sentBytes = sendSegmentDuringLossRecoveryPhase(seqNum);
 
@@ -1414,6 +1401,11 @@ bool TcpPacedConnection::checkRackLoss()
     }
     return enterRecovery;
 
+}
+
+uint32_t TcpPacedConnection::getTotalRetransmitted()
+{
+ return rexmitQueue->getTotalRetransmitted();
 }
 
 }
