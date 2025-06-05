@@ -111,14 +111,14 @@ void AutoNetworkConfigurator::handleMessage(cMessage *msg)
 {
     if (msg == timer) {
         cXMLElementList autorouteElements = configuration->getChildrenByTagName("autoroute");
-                if (autorouteElements.size() == 0) {
-                    cXMLElement defaultAutorouteElement("autoroute", "", nullptr);
-                    AutoNetworkConfigurator::reinvokeConfigurator(topology, &defaultAutorouteElement);
-                }
-                else {
-                    for (auto & autorouteElement : autorouteElements)
-                        AutoNetworkConfigurator::reinvokeConfigurator(topology, autorouteElement);
-                }
+        if (autorouteElements.size() == 0) {
+            cXMLElement defaultAutorouteElement("autoroute", "", nullptr);
+            AutoNetworkConfigurator::reinvokeConfigurator(topology, &defaultAutorouteElement);
+        }
+        else {
+            for (auto & autorouteElement : autorouteElements)
+                AutoNetworkConfigurator::reinvokeConfigurator(topology, autorouteElement);
+        }
        scheduleAt(simTime() + timerInterval, timer);  // rescheduling
     }
 }
@@ -251,6 +251,24 @@ void AutoNetworkConfigurator::configureRoutingTable(Node *node)
             clone->addOutInterface(new IMulticastRoute::OutInterface(*original->getOutInterface(j)));
         node->routingTable->addMulticastRoute(clone);
     }
+}
+
+void AutoNetworkConfigurator::processCommand(const cXMLElement& node)
+{
+    if (!strcmp(node.getTagName(), "update")) {
+        std::cout << "\n PROCESSING COMMAND YES UPDATE" << endl;
+        cXMLElementList autorouteElements = configuration->getChildrenByTagName("autoroute");
+        if (autorouteElements.size() == 0) {
+            cXMLElement defaultAutorouteElement("autoroute", "", nullptr);
+            AutoNetworkConfigurator::reinvokeConfigurator(topology, &defaultAutorouteElement);
+        }
+        else {
+            for (auto & autorouteElement : autorouteElements)
+                AutoNetworkConfigurator::reinvokeConfigurator(topology, autorouteElement);
+        }
+    }
+    else
+        ASSERT(false);
 }
 
 }

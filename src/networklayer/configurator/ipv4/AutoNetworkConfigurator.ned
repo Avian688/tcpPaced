@@ -55,5 +55,5 @@ simple AutoNetworkConfigurator extends Ipv4NetworkConfigurator
     parameters:
         @class(inet::AutoNetworkConfigurator);
         @display("i=block/cogwheel");
-        double updateInterval @unit(s) = default(0.0200001s);
+        double updateInterval @unit(s) = default(0.001s);
 }

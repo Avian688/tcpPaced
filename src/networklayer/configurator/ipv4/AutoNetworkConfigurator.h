@@ -19,6 +19,7 @@
 #include "inet/networklayer/configurator/ipv4/Ipv4NetworkConfigurator.h"
 #include "inet/networklayer/configurator/base/NetworkConfiguratorBase.h"
 #include "inet/common/packet/chunk/ByteCountChunk.h"
+#include "inet/common/scenario/IScriptable.h"
 
 namespace inet {
 
@@ -57,12 +58,13 @@ namespace inet {
  * -----------------------------------------------------
  * Written by Aiden Valentine
  */
-class AutoNetworkConfigurator : public Ipv4NetworkConfigurator{
+class AutoNetworkConfigurator : public Ipv4NetworkConfigurator, public IScriptable {
     public:
         virtual void reinvokeConfigurator(Topology& topology, cXMLElement *autorouteElement);
         void configureRoutingTable(Node *node);
         virtual void configureAllRoutingTables() override;
         virtual void configureRoutingTable(IIpv4RoutingTable *routingTable) override;
+        virtual void processCommand(const cXMLElement& node) override;
         virtual ~AutoNetworkConfigurator(){};
     protected:
         simtime_t timerInterval;
