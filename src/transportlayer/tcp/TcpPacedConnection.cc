@@ -1062,10 +1062,13 @@ void TcpPacedConnection::cancelPaceTimer() {
 
 void TcpPacedConnection::enqueueData()
 {
-    Packet *msg = new Packet("Packet");
-    const auto & bytes = makeShared<ByteCountChunk>(B(1447));
-    msg->insertAtBack(bytes);
-    sendQueue->enqueueAppData(msg);
+    if(sendQueue->getBufferEndSeq() - sendQueue->getBufferStartSeq() < (2000000000)){
+        Packet *msg = new Packet("Packet");
+        const uint32_t packetSize = (2000000000 - (sendQueue->getBufferEndSeq() - sendQueue->getBufferStartSeq()));
+        Ptr<Chunk> bytes = makeShared<ByteCountChunk>(B(packetSize));
+        msg->insertAtBack(bytes);
+        sendQueue->enqueueAppData(msg);
+    }
 }
 
 void TcpPacedConnection::setSackedHeadLost()
