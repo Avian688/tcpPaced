@@ -47,8 +47,7 @@ bool TcpPacedFamily::sendData(bool sendCommandInvoked)
     // Send window is effectively the minimum of the congestion window (cwnd)
     // and the advertised window (snd_wnd).
     //
-    dynamic_cast<TcpPacedConnection*>(conn)->sendPendingData();
-    return true;
+    return dynamic_cast<TcpPacedConnection*>(conn)->sendPendingData();
 }
 
 void TcpPacedFamily::processRexmitTimer(TcpEventCode &event) {

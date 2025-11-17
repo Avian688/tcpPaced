@@ -103,7 +103,7 @@ public:
 
     virtual void cancelPaceTimer();
 
-    virtual void sendPendingData();
+    virtual bool sendPendingData();
 
     virtual void setAllSackedLost();
 

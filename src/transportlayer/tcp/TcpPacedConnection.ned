@@ -42,6 +42,21 @@ simple TcpPacedConnection extends TcpConnection
         @signal[mbytesLoss]; 
         @signal[msendElapsed]; 
         @signal[mackElapsed];
+
+        // Cubic added signals
+        @signal[bicTarget];
+        @signal[originalPoint];
+        @signal[cwndSeg];
+        @signal[bicK];
+        @signal[cnt];
+        @signal[lastMaxWindow];
+        @signal[delayMin];
+        @signal[concave];
+        @signal[convex];
+        @signal[friendly];
+        @signal[sndUna];
+        @signal[recoveryPoint];
+        
         
         @statistic[throughput](record=vector; interpolationmode=sample-hold);
         @statistic[additiveIncrease](record=vector; interpolationmode=sample-hold);
@@ -53,11 +68,25 @@ simple TcpPacedConnection extends TcpConnection
         @statistic[highRxt](record=vector; interpolationmode=sample-hold);
         
         @statistic[mDelivered](record=vector; interpolationmode=sample-hold);
-		@statistic[mFirstSentTime](record=vector; interpolationmode=sample-hold);
-		@statistic[mLastSentTime](record=vector; interpolationmode=sample-hold);
-		@statistic[mbytesInFlight](record=vector; interpolationmode=sample-hold);
-		@statistic[mbytesInFlightTotal](record=vector; interpolationmode=sample-hold);
-		@statistic[mbytesLoss](record=vector; interpolationmode=sample-hold);
-		@statistic[msendElapsed](record=vector; interpolationmode=sample-hold);
-		@statistic[mackElapsed](record=vector; interpolationmode=sample-hold);
+        @statistic[mFirstSentTime](record=vector; interpolationmode=sample-hold);
+        @statistic[mLastSentTime](record=vector; interpolationmode=sample-hold);
+        @statistic[mbytesInFlight](record=vector; interpolationmode=sample-hold);
+        @statistic[mbytesInFlightTotal](record=vector; interpolationmode=sample-hold);
+        @statistic[mbytesLoss](record=vector; interpolationmode=sample-hold);
+        @statistic[msendElapsed](record=vector; interpolationmode=sample-hold);
+        @statistic[mackElapsed](record=vector; interpolationmode=sample-hold);
+
+        // Cubic added statistics
+        @statistic[bicTarget](record=vector; interpolationmode=sample-hold);
+        @statistic[originalPoint](record=vector; interpolationmode=sample-hold);
+        @statistic[cwndSeg](record=vector; interpolationmode=sample-hold);
+        @statistic[bicK](record=vector; interpolationmode=sample-hold);
+        @statistic[cnt](record=vector; interpolationmode=sample-hold);
+        @statistic[lastMaxWindow](record=vector; interpolationmode=sample-hold);
+        @statistic[delayMin](record=vector; interpolationmode=sample-hold);
+        @statistic[concave](record=vector; interpolationmode=sample-hold);
+        @statistic[convex](record=vector; interpolationmode=sample-hold);
+        @statistic[friendly](record=vector; interpolationmode=sample-hold);
+        @statistic[sndUna](record=vector; interpolationmode=sample-hold);
+        @statistic[recoveryPoint](record=vector; interpolationmode=sample-hold);
 }

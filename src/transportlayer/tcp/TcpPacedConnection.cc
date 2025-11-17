@@ -482,6 +482,9 @@ TcpEventCode TcpPacedConnection::process_RCV_SEGMENT(Packet *tcpSegment, const P
     //
     TcpEventCode event;
 
+    std::cout << "\n RCV_SEGMENT: " << tcpSegment->getDetailStringRepresentation() << endl;
+    std::cout << "\n CONN: " << this->getClassAndFullName() << endl;
+
     if (fsm.getState() == TCP_S_LISTEN) {
         event = processSegmentInListen(tcpSegment, tcpHeader, src, dest);
     }
@@ -491,6 +494,7 @@ TcpEventCode TcpPacedConnection::process_RCV_SEGMENT(Packet *tcpSegment, const P
     else {
         // RFC 793 steps "first check sequence number", "second check the RST bit", etc
         bytesRcvd += tcpSegment->getByteLength();
+        //this should be sent to main connection??
         event = processSegment1stThru8th(tcpSegment, tcpHeader);
     }
 
@@ -603,7 +607,6 @@ bool TcpPacedConnection::sendData(uint32_t congestionWindow)
 
     emit(unackedSignal, state->snd_max - state->snd_una);
 
-    std::cout << "\n send data being called!" << endl;
     // notify (once is enough)
     tcpAlgorithm->ackSent();
 
@@ -729,10 +732,11 @@ uint32_t TcpPacedConnection::sendSegment(uint32_t bytes)
     return sentBytes;
 }
 
-void TcpPacedConnection::sendPendingData()
+bool TcpPacedConnection::sendPendingData()
 {
+    std::cout << "\n" << this->getClassAndFullName() << " - SENDING PENDING DATA AT SIMTIME " << simTime() << endl;
+    bool dataSent = false;
     if(pace){
-        bool dataSent = false;
         if (!paceMsg->isScheduled()){
             if(state->lossRecovery){
                 dataSent = sendDataDuringLossRecovery(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
@@ -744,7 +748,6 @@ void TcpPacedConnection::sendPendingData()
             else{
                 dataSent = sendDataDuringLossRecovery(dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd());
             }
-
             if(dataSent){
                 EV_INFO << "sendPendingData: Data sent! Scheduling pacing timer for " << simTime() + intersendingTime << "\n";
                 if(intersendingTime > 0){
@@ -756,12 +759,11 @@ void TcpPacedConnection::sendPendingData()
             }
         }
     }
+    return dataSent;
 }
 
 bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
 {
-    ASSERT(state->sack_enabled && state->lossRecovery);
-
     // RFC 3517 pages 7 and 8: "(5) In order to take advantage of potential additional available
     // cwnd, proceed to step (C) below.
     // (...)
