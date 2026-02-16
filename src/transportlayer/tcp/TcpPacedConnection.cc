@@ -482,9 +482,6 @@ TcpEventCode TcpPacedConnection::process_RCV_SEGMENT(Packet *tcpSegment, const P
     //
     TcpEventCode event;
 
-    std::cout << "\n RCV_SEGMENT: " << tcpSegment->getDetailStringRepresentation() << endl;
-    std::cout << "\n CONN: " << this->getClassAndFullName() << endl;
-
     if (fsm.getState() == TCP_S_LISTEN) {
         event = processSegmentInListen(tcpSegment, tcpHeader, src, dest);
     }
@@ -734,7 +731,6 @@ uint32_t TcpPacedConnection::sendSegment(uint32_t bytes)
 
 bool TcpPacedConnection::sendPendingData()
 {
-    std::cout << "\n" << this->getClassAndFullName() << " - SENDING PENDING DATA AT SIMTIME " << simTime() << endl;
     bool dataSent = false;
     if(pace){
         if (!paceMsg->isScheduled()){
