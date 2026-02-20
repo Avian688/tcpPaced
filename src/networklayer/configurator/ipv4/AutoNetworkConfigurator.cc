@@ -256,7 +256,6 @@ void AutoNetworkConfigurator::configureRoutingTable(Node *node)
 void AutoNetworkConfigurator::processCommand(const cXMLElement& node)
 {
     if (!strcmp(node.getTagName(), "update")) {
-        std::cout << "\n PROCESSING COMMAND YES UPDATE" << endl;
         cXMLElementList autorouteElements = configuration->getChildrenByTagName("autoroute");
         if (autorouteElements.size() == 0) {
             cXMLElement defaultAutorouteElement("autoroute", "", nullptr);
