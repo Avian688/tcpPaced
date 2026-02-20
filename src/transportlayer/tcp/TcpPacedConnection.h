@@ -46,6 +46,7 @@ public:
     static simsignal_t mbytesInFlightTotalSignal;
     static simsignal_t mbytesLossSignal;
     static simsignal_t paceRateSignal;
+    static simsignal_t retransmissionRateSignal;
 
     struct RateSample {
       uint32_t m_deliveryRate;
@@ -111,6 +112,8 @@ public:
 
     virtual void computeThroughput();
 
+    virtual void computeRetransmissionRate();
+
     virtual bool nextSeg(uint32_t& seqNum, bool isRecovery);
 
     virtual bool checkIsLost(uint32_t seqNo);
@@ -149,7 +152,6 @@ public:
 
     virtual bool checkRackLoss();
 
-    virtual uint32_t getTotalRetransmitted();
 protected:
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;
@@ -199,9 +201,19 @@ protected:
     bool scoreboardUpdated;
 
     bool isRetransDataAcked;
+
+    // Retransmission-rate accounting (count bytes when retransmissions are sent)
+    simtime_t lastRetransmissionRateTime;
+    uint32_t totalRetransmittedBytesCounter = 0;
+    uint32_t lastTotalRetransmittedBytes = 0;
+    uint32_t prevLastTotalRetransmittedBytes = 0;
+    double currRetransmissionRate = 0;
+    bool nextSegSelectedRetransmission = false;
+
 public:
     cMessage *paceMsg;
     cMessage *throughputTimer;
+    cMessage *retransmissionRateTimer;
     simtime_t intersendingTime;
     cMessage *rackTimer;
     double throughputInterval;

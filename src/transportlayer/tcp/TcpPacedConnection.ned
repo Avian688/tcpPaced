@@ -33,6 +33,7 @@ simple TcpPacedConnection extends TcpConnection
         @signal[lossRecovery];
         @signal[highRxt];
         @signal[throughput];
+        @signal[retransmissionRate];
         
         @signal[mDelivered];
         @signal[mFirstSentTime]; 
@@ -59,6 +60,7 @@ simple TcpPacedConnection extends TcpConnection
         
         
         @statistic[throughput](record=vector; interpolationmode=sample-hold);
+        @statistic[retransmissionRate](record=vector; interpolationmode=sample-hold);
         @statistic[additiveIncrease](record=vector; interpolationmode=sample-hold);
         @statistic[state](record=vector; interpolationmode=sample-hold);
         @statistic[pacingGain](record=vector; interpolationmode=sample-hold);
