@@ -114,7 +114,7 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
     currRetransmissionRate = 0;
     nextSegSelectedRetransmission = false;
     lastRetransmissionRateTime = simTime();
-    scheduleAt(throughputInterval, retransmissionRateTimer);
+    scheduleAt(simTime() + throughputInterval, retransmissionRateTimer);
 }
 
 TcpConnection *TcpPacedConnection::cloneListeningConnection()
