@@ -96,6 +96,10 @@ public:
 
     virtual simtime_t getPacingRate();
 
+    virtual void setAppLimited(uint32_t deliveredThreshold) { m_appLimited = deliveredThreshold; }
+
+    virtual bool isCwndLimited(uint32_t congestionWindow) const;
+
     virtual void retransmitOneSegment(bool called_at_rto) override;
 
     virtual bool sendDataDuringLossRecovery(uint32_t congestionWindow);

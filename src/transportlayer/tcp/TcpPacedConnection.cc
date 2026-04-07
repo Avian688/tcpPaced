@@ -628,6 +628,17 @@ bool TcpPacedConnection::sendPendingData()
     return dataSent;
 }
 
+bool TcpPacedConnection::isCwndLimited(uint32_t congestionWindow) const
+{
+    if (state == nullptr || sendQueue == nullptr)
+        return false;
+
+    if (sendQueue->getBytesAvailable(state->snd_max) == 0)
+        return false;
+
+    return m_bytesInFlight + state->snd_mss >= congestionWindow;
+}
+
 bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
 {
     uint32_t availableWindow = (state->pipe > congestionWindow) ? 0 : congestionWindow - state->pipe;
