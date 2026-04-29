@@ -58,8 +58,16 @@ public:
       simtime_t m_sendElapsed;
       simtime_t m_ackElapsed;
       uint32_t m_bytesLoss;
+      uint32_t m_txInFlight;
       uint32_t m_priorInFlight;
       uint32_t m_ackedSacked;
+      };
+
+    struct LossNotificationSample {
+      bool m_valid = false;
+      uint32_t m_bytesLoss = 0;
+      uint32_t m_txInFlight = 0;
+      bool m_isAppLimited = false;
       };
 
     TcpPacedConnection();
@@ -80,6 +88,8 @@ protected:
     virtual void enqueueData();
 
     virtual void updateSample(uint32_t delivered, uint32_t lost, bool is_sack_reneg, uint32_t priorInFlight, simtime_t minRtt);
+
+    virtual void updateLossNotificationSample();
 
     virtual void calculateAppLimited();
 
@@ -140,6 +150,8 @@ public:
 
     virtual RateSample getRateSample() {return m_rateSample;};
 
+    virtual LossNotificationSample consumeLossNotificationSample();
+
     virtual uint32_t getBytesInFlight() {return m_bytesInFlight;};
 
     virtual uint32_t getIsRetransDataAcked() {return isRetransDataAcked;};
@@ -185,6 +197,7 @@ protected:
     simtime_t m_firstSentTime;
 
     RateSample m_rateSample;
+    LossNotificationSample m_lossNotificationSample;
     uint32_t m_bytesInFlight;
     uint32_t m_bytesLoss;
 

@@ -100,9 +100,11 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
     m_rateSample.m_interval = 0;
     m_rateSample.m_isAppLimited = false;
     m_rateSample.m_priorDelivered = 0;
+    m_rateSample.m_txInFlight = 0;
     m_rateSample.m_priorInFlight = 0;
     m_rateSample.m_priorTime = 0;
     m_rateSample.m_sendElapsed = 0;
+    m_lossNotificationSample = {};
 
     fack_enabled = true;
     rack_enabled = true;
@@ -156,6 +158,8 @@ void TcpPacedConnection::initClonedConnection(TcpConnection *listenerConn)
 
     lastThroughputTime = simTime();
     prevLastThroughputTime = simTime();
+    m_rateSample.m_txInFlight = 0;
+    m_lossNotificationSample = {};
 
     // Keep separate timers: throughput (receiver-side bytesRcvd) and retransmissionRate (sender-side send counting)
     scheduleAt(simTime() + throughputInterval, throughputTimer);
@@ -251,7 +255,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
             updateInFlight();
 
             uint32_t currentLost = m_bytesLoss;
-            uint32_t lost = (currentLost > previousLost) ? currentLost - previousLost : previousLost - currentLost;
+            uint32_t lost = (currentLost > previousLost) ? currentLost - previousLost : 0;
 
             updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
 
@@ -348,7 +352,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
             updateInFlight();
 
             uint32_t currentLost = m_bytesLoss;
-            uint32_t lost = (currentLost > previousLost) ? currentLost - previousLost : previousLost - currentLost;
+            uint32_t lost = (currentLost > previousLost) ? currentLost - previousLost : 0;
 
             updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
 
@@ -577,7 +581,8 @@ uint32_t TcpPacedConnection::sendSegment(uint32_t bytes)
     if (state->sack_enabled) {
         rexmitQueue->enqueueSentData(old_snd_nxt, state->snd_nxt);
         if (pace) {
-            rexmitQueue->skbSent(state->snd_nxt, m_firstSentTime, simTime(), m_deliveredTime, false, m_delivered, m_appLimited);
+            rexmitQueue->skbSent(state->snd_nxt, m_firstSentTime, simTime(), m_deliveredTime,
+                    m_bytesInFlight + sentBytes, false, m_delivered, m_appLimited);
         }
     }
 
@@ -879,6 +884,7 @@ void TcpPacedConnection::skbDelivered(uint32_t seqNum)
                 m_rateSample.m_priorDelivered = skbRegion.m_delivered;
                 m_rateSample.m_priorTime = skbRegion.m_deliveredTime;
                 m_rateSample.m_isAppLimited = skbRegion.m_isAppLimited;
+                m_rateSample.m_txInFlight = skbRegion.m_txInFlight;
                 m_rateSample.m_sendElapsed = skbRegion.m_lastSentTime - skbRegion.m_firstSentTime;
 
                 m_firstSentTime = skbRegion.m_lastSentTime;
@@ -914,6 +920,21 @@ void TcpPacedConnection::updateInFlight()
     emit(mbytesLossSignal, m_bytesLoss);
 }
 
+void TcpPacedConnection::updateLossNotificationSample()
+{
+    m_lossNotificationSample = {};
+
+    uint32_t txInFlight = 0;
+    uint32_t lostBytes = 0;
+    bool isAppLimited = false;
+    if (rexmitQueue->getRecentLossSample(txInFlight, lostBytes, isAppLimited)) {
+        m_lossNotificationSample.m_valid = true;
+        m_lossNotificationSample.m_bytesLoss = lostBytes;
+        m_lossNotificationSample.m_txInFlight = txInFlight;
+        m_lossNotificationSample.m_isAppLimited = isAppLimited;
+    }
+}
+
 void TcpPacedConnection::updateSample(uint32_t delivered, uint32_t lost, bool is_sack_reneg, uint32_t priorInFlight, simtime_t minRtt)
 {
     if (m_appLimited != 0 && m_delivered > m_appLimited)
@@ -921,6 +942,8 @@ void TcpPacedConnection::updateSample(uint32_t delivered, uint32_t lost, bool is
 
     m_rateSample.m_ackedSacked = delivered;
     m_rateSample.m_bytesLoss = lost;
+    if (delivered == 0 || m_rateSample.m_txInFlight == 0)
+        m_rateSample.m_txInFlight = priorInFlight;
     m_rateSample.m_priorInFlight = priorInFlight;
 
     if (m_rateSample.m_priorTime == 0 || is_sack_reneg) {
@@ -944,6 +967,13 @@ void TcpPacedConnection::updateSample(uint32_t delivered, uint32_t lost, bool is
         m_rateAppLimited = m_rateSample.m_isAppLimited;
         m_rateSample.m_deliveryRate = m_rateSample.m_delivered / m_rateSample.m_interval;
     }
+}
+
+TcpPacedConnection::LossNotificationSample TcpPacedConnection::consumeLossNotificationSample()
+{
+    auto sample = m_lossNotificationSample;
+    m_lossNotificationSample = {};
+    return sample;
 }
 
 bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader, const TcpOptionSack& option)
@@ -1015,8 +1045,11 @@ bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader
             }
         }
 
-        if (rexmitQueue->updateLost(rexmitQueue->getHighestSackedSeqNum()))
+        rexmitQueue->clearRecentLossSample();
+        if (rexmitQueue->updateLost(rexmitQueue->getHighestSackedSeqNum())) {
+            updateLossNotificationSample();
             dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->notifyLost();
+        }
 
         state->rcv_sacks += n;
         emit(rcvSacksSignal, state->rcv_sacks);
@@ -1031,7 +1064,17 @@ bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader
 
 void TcpPacedConnection::calculateAppLimited()
 {
-    m_appLimited = 0;
+    if (m_appLimited != 0)
+        return;
+
+    const uint32_t unsentBytes = sendQueue->getBytesAvailable(state->snd_max);
+    const uint32_t congestionWindow = dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->getCwnd();
+    const bool hasLessThanOneMssToSend = unsentBytes < state->snd_mss;
+    const bool isNotCwndLimited = m_bytesInFlight < congestionWindow;
+    const bool hasNoLostDataToRetransmit = m_bytesLoss == 0;
+
+    if (hasLessThanOneMssToSend && isNotCwndLimited && hasNoLostDataToRetransmit)
+        m_appLimited = (m_delivered + m_bytesInFlight) ? (m_delivered + m_bytesInFlight) : 1;
 }
 
 void TcpPacedConnection::addSkbInfoTags(const Ptr<TcpHeader> &tcpHeader, uint32_t payloadBytes)
@@ -1058,8 +1101,11 @@ bool TcpPacedConnection::checkRackLoss()
 {
     double timeout = 0.0;
     bool enterRecovery = false;
-    if (rexmitQueue->checkRackLoss(m_rack, timeout))
+    rexmitQueue->clearRecentLossSample();
+    if (rexmitQueue->checkRackLoss(m_rack, timeout)) {
+        updateLossNotificationSample();
         dynamic_cast<TcpPacedFamily*>(tcpAlgorithm)->notifyLost();
+    }
 
     if (rexmitQueue->getLost() != 0 && !state->lossRecovery)
         enterRecovery = true;
