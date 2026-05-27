@@ -104,6 +104,8 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
     m_rateSample.m_priorInFlight = 0;
     m_rateSample.m_priorTime = 0;
     m_rateSample.m_sendElapsed = 0;
+    m_rateSample.m_lastSentTime = 0;
+    m_rateSample.m_lastEndSeq = 0;
     m_lossNotificationSample = {};
 
     fack_enabled = true;
@@ -159,6 +161,8 @@ void TcpPacedConnection::initClonedConnection(TcpConnection *listenerConn)
     lastThroughputTime = simTime();
     prevLastThroughputTime = simTime();
     m_rateSample.m_txInFlight = 0;
+    m_rateSample.m_lastSentTime = 0;
+    m_rateSample.m_lastEndSeq = 0;
     m_lossNotificationSample = {};
 
     // Keep separate timers: throughput (receiver-side bytesRcvd) and retransmissionRate (sender-side send counting)
@@ -202,6 +206,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
     uint32_t previousLost = m_bytesLoss;
     uint32_t priorInFlight = m_bytesInFlight;
     int payloadLength = tcpSegment->getByteLength() - B(tcpHeader->getHeaderLength()).get();
+    beginRateSample();
 
     TcpStateVariables *state = getState();
     if (state && state->ect) {
@@ -878,7 +883,11 @@ void TcpPacedConnection::skbDelivered(uint32_t seqNum)
 
             m_deliveredTime = simTime();
 
-            if (m_rateSample.m_priorDelivered == 0 || skbRegion.m_delivered > m_rateSample.m_priorDelivered)
+            const bool isMostRecentDeliveredSkb = m_rateSample.m_priorDelivered == 0 ||
+                    skbRegion.m_lastSentTime > m_rateSample.m_lastSentTime ||
+                    (skbRegion.m_lastSentTime == m_rateSample.m_lastSentTime && seqNum > m_rateSample.m_lastEndSeq);
+
+            if (isMostRecentDeliveredSkb)
             {
                 m_rateSample.m_ackElapsed = simTime() - skbRegion.m_deliveredTime;
                 m_rateSample.m_priorDelivered = skbRegion.m_delivered;
@@ -886,6 +895,8 @@ void TcpPacedConnection::skbDelivered(uint32_t seqNum)
                 m_rateSample.m_isAppLimited = skbRegion.m_isAppLimited;
                 m_rateSample.m_txInFlight = skbRegion.m_txInFlight;
                 m_rateSample.m_sendElapsed = skbRegion.m_lastSentTime - skbRegion.m_firstSentTime;
+                m_rateSample.m_lastSentTime = skbRegion.m_lastSentTime;
+                m_rateSample.m_lastEndSeq = seqNum;
 
                 m_firstSentTime = skbRegion.m_lastSentTime;
 
@@ -935,6 +946,24 @@ void TcpPacedConnection::updateLossNotificationSample()
     }
 }
 
+void TcpPacedConnection::beginRateSample()
+{
+    m_rateSample.m_deliveryRate = 0;
+    m_rateSample.m_interval = 0;
+    m_rateSample.m_delivered = 0;
+    m_rateSample.m_priorDelivered = 0;
+    m_rateSample.m_priorTime = 0;
+    m_rateSample.m_sendElapsed = 0;
+    m_rateSample.m_ackElapsed = 0;
+    m_rateSample.m_lastSentTime = 0;
+    m_rateSample.m_bytesLoss = 0;
+    m_rateSample.m_txInFlight = 0;
+    m_rateSample.m_priorInFlight = 0;
+    m_rateSample.m_ackedSacked = 0;
+    m_rateSample.m_lastEndSeq = 0;
+    m_rateSample.m_isAppLimited = false;
+}
+
 void TcpPacedConnection::updateSample(uint32_t delivered, uint32_t lost, bool is_sack_reneg, uint32_t priorInFlight, simtime_t minRtt)
 {
     if (m_appLimited != 0 && m_delivered > m_appLimited)
@@ -961,11 +990,12 @@ void TcpPacedConnection::updateSample(uint32_t delivered, uint32_t lost, bool is
         return;
     }
 
+    m_rateSample.m_deliveryRate = m_rateSample.m_delivered / m_rateSample.m_interval;
+
     if (!m_rateSample.m_isAppLimited || (m_rateSample.m_delivered * m_rateInterval >= m_rateDelivered * m_rateSample.m_interval)) {
         m_rateDelivered = m_rateSample.m_delivered;
         m_rateInterval = m_rateSample.m_interval;
         m_rateAppLimited = m_rateSample.m_isAppLimited;
-        m_rateSample.m_deliveryRate = m_rateSample.m_delivered / m_rateSample.m_interval;
     }
 }
 

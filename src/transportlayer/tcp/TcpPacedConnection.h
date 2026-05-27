@@ -57,10 +57,12 @@ public:
       simtime_t m_priorTime;
       simtime_t m_sendElapsed;
       simtime_t m_ackElapsed;
+      simtime_t m_lastSentTime;
       uint32_t m_bytesLoss;
       uint32_t m_txInFlight;
       uint32_t m_priorInFlight;
       uint32_t m_ackedSacked;
+      uint32_t m_lastEndSeq;
       };
 
     struct LossNotificationSample {
@@ -86,6 +88,8 @@ protected:
     virtual TcpEventCode process_RCV_SEGMENT(Packet *tcpSegment, const Ptr<const TcpHeader>& tcpHeader, L3Address src, L3Address dest) override;
 
     virtual void enqueueData();
+
+    virtual void beginRateSample();
 
     virtual void updateSample(uint32_t delivered, uint32_t lost, bool is_sack_reneg, uint32_t priorInFlight, simtime_t minRtt);
 
