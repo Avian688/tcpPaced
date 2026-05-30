@@ -34,6 +34,8 @@
 namespace inet {
 namespace tcp {
 
+class TcpPacedFamily;
+
 class TcpPacedConnection : public TcpConnection {
 public:
     static simsignal_t throughputSignal;
@@ -173,6 +175,10 @@ public:
     virtual bool checkRackLoss();
 
 protected:
+    virtual void configureMechanismParameters();
+
+    virtual TcpPacedFamily *getPacedAlgorithm() const;
+
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;
     bool pace;
