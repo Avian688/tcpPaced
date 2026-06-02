@@ -160,6 +160,8 @@ public:
 
     virtual uint32_t getBytesInFlight() {return m_bytesInFlight;};
 
+    virtual uint64_t getTotalDetectedLostBytes() const;
+
     virtual uint32_t getIsRetransDataAcked() {return isRetransDataAcked;};
 
     virtual simtime_t getMinRtt() {return connMinRtt;};

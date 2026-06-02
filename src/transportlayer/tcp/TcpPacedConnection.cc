@@ -977,6 +977,11 @@ void TcpPacedConnection::updateInFlight()
     emit(mbytesLossSignal, m_bytesLoss);
 }
 
+uint64_t TcpPacedConnection::getTotalDetectedLostBytes() const
+{
+    return rexmitQueue == nullptr ? 0 : rexmitQueue->getTotalDetectedLostBytes();
+}
+
 void TcpPacedConnection::updateLossNotificationSample()
 {
     m_lossNotificationSample = {};
