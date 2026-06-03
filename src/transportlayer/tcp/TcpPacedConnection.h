@@ -132,6 +132,8 @@ public:
 
     virtual void setSackedHeadLost();
 
+    virtual void setSackedHeadLostIfRackDisabled();
+
     virtual void computeThroughput();
 
     virtual void computeRetransmissionRate();

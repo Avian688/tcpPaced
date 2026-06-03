@@ -900,6 +900,12 @@ void TcpPacedConnection::setSackedHeadLost()
         rexmitQueue->markHeadAsLost();
 }
 
+void TcpPacedConnection::setSackedHeadLostIfRackDisabled()
+{
+    if (!rack_enabled)
+        setSackedHeadLost();
+}
+
 void TcpPacedConnection::setAllSackedLost()
 {
     rexmitQueue->setAllLost();
