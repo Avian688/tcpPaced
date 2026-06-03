@@ -42,6 +42,8 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
 
     virtual void notifyLost(){};
 
+    virtual void rackLossDetected();
+
   protected:
 
     virtual void processRexmitTimer(TcpEventCode& event) override;

@@ -255,21 +255,14 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 
             if (rack_enabled)
             {
-                uint32_t tser = state->ts_recent;
-                simtime_t rtt = getPacedAlgorithm()->getRtt();
-
                 if (!scoreboardUpdated && rexmitQueue->findRegion(tcpHeader->getAckNo()))
                 {
-                    TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(tcpHeader->getAckNo());
-                    m_rack->updateStats(tser, skbRegion.rexmitted, skbRegion.m_lastSentTime, tcpHeader->getAckNo(), state->snd_nxt, rtt);
+                    rackAdvance(tcpHeader->getAckNo(), tcpHeader);
                 }
                 else
                 {
                     uint32_t highestSacked = rexmitQueue->getHighestSackedSeqNum();
-                    if (rexmitQueue->findRegion(highestSacked)) {
-                        TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(highestSacked);
-                        m_rack->updateStats(tser, skbRegion.rexmitted,  skbRegion.m_lastSentTime, highestSacked, state->snd_nxt, rtt);
-                    }
+                    rackAdvance(highestSacked, tcpHeader);
                 }
 
                 bool exiting = false;
@@ -277,7 +270,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
                     exiting = true;
 
                 m_rack->updateReoWnd(m_reorder, m_dsackSeen, state->snd_nxt, tcpHeader->getAckNo(),
-                                     rexmitQueue->getTotalAmountOfSackedBytes(), 3, exiting, state->lossRecovery);
+                                     rexmitQueue->getTotalAmountOfSackedBytes(), 3, state->snd_mss, exiting, state->lossRecovery);
             }
             scoreboardUpdated = false;
 
@@ -285,8 +278,10 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 
             if (rexmitQueue->isUpdatedSackEnabled()) {
                 std::list<uint32_t> skbDeliveredList = rexmitQueue->getDiscardList(tcpHeader->getAckNo());
-                for (uint32_t endSeqNo : skbDeliveredList)
+                for (uint32_t endSeqNo : skbDeliveredList) {
+                    rackAdvance(endSeqNo, tcpHeader);
                     skbDelivered(endSeqNo);
+                }
             }
 
             uint32_t currentDelivered  = m_delivered - previousDelivered;
@@ -299,6 +294,10 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 
             updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
 
+            bool newRackLoss = false;
+            bool rackRecovery = checkRackLoss(&newRackLoss);
+            if (rackRecovery || newRackLoss)
+                getPacedAlgorithm()->rackLossDetected();
             tcpAlgorithm->receivedDuplicateAck();
             isRetransDataAcked = false;
             sendPendingData();
@@ -344,21 +343,14 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 
         if (rack_enabled)
         {
-            uint32_t tser = state->ts_recent;
-            simtime_t rtt = getPacedAlgorithm()->getRtt();
-
             if (!scoreboardUpdated && rexmitQueue->findRegion(tcpHeader->getAckNo()))
             {
-                TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(tcpHeader->getAckNo());
-                m_rack->updateStats(tser, skbRegion.rexmitted, skbRegion.m_lastSentTime, tcpHeader->getAckNo(), state->snd_nxt, rtt);
+                rackAdvance(tcpHeader->getAckNo(), tcpHeader);
             }
             else
             {
                 uint32_t highestSacked = rexmitQueue->getHighestSackedSeqNum();
-                if (rexmitQueue->findRegion(highestSacked)) {
-                    TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(highestSacked);
-                    m_rack->updateStats(tser, skbRegion.rexmitted,  skbRegion.m_lastSentTime, highestSacked, state->snd_nxt, rtt);
-                }
+                rackAdvance(highestSacked, tcpHeader);
             }
 
             bool exiting = false;
@@ -366,13 +358,14 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
                 exiting = true;
 
             m_rack->updateReoWnd(m_reorder, m_dsackSeen, state->snd_nxt, old_snd_una,
-                                 rexmitQueue->getTotalAmountOfSackedBytes(), 3, exiting, state->lossRecovery);
+                                 rexmitQueue->getTotalAmountOfSackedBytes(), 3, state->snd_mss, exiting, state->lossRecovery);
         }
         scoreboardUpdated = false;
 
         if (rexmitQueue->isUpdatedSackEnabled()) {
             std::list<uint32_t> skbDeliveredList = rexmitQueue->getDiscardList(discardUpToSeq);
             for (uint32_t endSeqNo : skbDeliveredList) {
+                rackAdvance(endSeqNo, tcpHeader);
                 skbDelivered(endSeqNo);
                 if (state->lossRecovery && rexmitQueue->isRetransmittedDataAcked(endSeqNo))
                     isRetransDataAcked = true;
@@ -398,6 +391,10 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 
             updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
 
+            bool newRackLoss = false;
+            bool rackRecovery = checkRackLoss(&newRackLoss);
+            if (rackRecovery || newRackLoss)
+                getPacedAlgorithm()->rackLossDetected();
             tcpAlgorithm->receivedDataAck(old_snd_una);
             isRetransDataAcked = false;
             state->dupacks = 0;
@@ -465,8 +462,12 @@ bool TcpPacedConnection::processTimer(cMessage *msg)
         sendPendingData();
     }
     else if (msg == rackTimer) {
-        if (rack_enabled)
-            checkRackLoss();
+        if (rack_enabled) {
+            bool newRackLoss = false;
+            bool rackRecovery = checkRackLoss(&newRackLoss);
+            if (rackRecovery || newRackLoss)
+                getPacedAlgorithm()->rackLossDetected();
+        }
     }
     else if (msg == throughputTimer) {
         // receiver-side goodput/throughput timer
@@ -997,6 +998,19 @@ void TcpPacedConnection::updateLossNotificationSample()
     }
 }
 
+void TcpPacedConnection::rackAdvance(uint32_t endSeqNo, const Ptr<const TcpHeader>& tcpHeader)
+{
+    if (!rack_enabled || !rexmitQueue->isUpdatedSackEnabled())
+        return;
+
+    if (!rexmitQueue->findRegion(endSeqNo))
+        return;
+
+    TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(endSeqNo);
+    m_rack->updateStats(getTSecr(tcpHeader), skbRegion.rexmitted, skbRegion.m_lastSentTime,
+            endSeqNo, state->snd_nxt, getPacedAlgorithm()->getRtt());
+}
+
 void TcpPacedConnection::beginRateSample()
 {
     m_rateSample.m_deliveryRate = 0;
@@ -1115,6 +1129,7 @@ bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader
                 std::list<uint32_t> skbDeliveredList = rexmitQueue->setSackedBitList(tmp.getStart(), tmp.getEnd());
                 scoreboardUpdated = true;
                 for (uint32_t endSeqNo : skbDeliveredList) {
+                    rackAdvance(endSeqNo, tcpHeader);
                     if (fack_enabled || rack_enabled) {
                         if (endSeqNo > m_sndFack)
                             m_sndFack = endSeqNo;
@@ -1179,18 +1194,23 @@ bool TcpPacedConnection::checkFackLoss()
     return fack_diff > state->snd_mss * 3;
 }
 
-bool TcpPacedConnection::checkRackLoss()
+bool TcpPacedConnection::checkRackLoss(bool *newLossDetected)
 {
     if (!rack_enabled || !rexmitQueue->isUpdatedSackEnabled())
         return false;
 
     double timeout = 0.0;
     bool enterRecovery = false;
+    bool markedLoss = false;
     rexmitQueue->clearRecentLossSample();
     if (rexmitQueue->checkRackLoss(m_rack, timeout)) {
+        markedLoss = true;
         updateLossNotificationSample();
         getPacedAlgorithm()->notifyLost();
     }
+
+    if (newLossDetected)
+        *newLossDetected = markedLoss;
 
     if (rexmitQueue->getLost() != 0 && !state->lossRecovery)
         enterRecovery = true;
@@ -1198,7 +1218,9 @@ bool TcpPacedConnection::checkRackLoss()
     if (timeout > 0) {
         if ((simTime() + timeout) > simTime())
             rescheduleAt(simTime() + timeout, rackTimer);
-        tcpAlgorithm->restartRexmitTimer();
+    }
+    else if (rackTimer->isScheduled()) {
+        cancelEvent(rackTimer);
     }
     return enterRecovery;
 }

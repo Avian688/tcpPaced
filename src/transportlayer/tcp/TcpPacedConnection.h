@@ -97,6 +97,8 @@ protected:
 
     virtual void updateLossNotificationSample();
 
+    virtual void rackAdvance(uint32_t endSeqNo, const Ptr<const TcpHeader>& tcpHeader);
+
     virtual void calculateAppLimited();
 
     virtual bool processSACKOption(const Ptr<const TcpHeader>& tcpHeader, const TcpOptionSack& option) override;
@@ -174,7 +176,7 @@ public:
 
     virtual bool checkFackLoss();
 
-    virtual bool checkRackLoss();
+    virtual bool checkRackLoss(bool *newLossDetected = nullptr);
 
 protected:
     virtual void configureMechanismParameters();

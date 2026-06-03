@@ -50,6 +50,22 @@ bool TcpPacedFamily::sendData(bool sendCommandInvoked)
     return dynamic_cast<TcpPacedConnection*>(conn)->sendPendingData();
 }
 
+void TcpPacedFamily::rackLossDetected()
+{
+    auto pacedConn = dynamic_cast<TcpPacedConnection *>(conn);
+    if (!state->sack_enabled)
+        return;
+
+    if (!state->lossRecovery) {
+        state->recoveryPoint = state->snd_max;
+        state->lossRecovery = true;
+    }
+
+    pacedConn->updateInFlight();
+    if (pacedConn->doRetransmit())
+        restartRexmitTimer();
+}
+
 void TcpPacedFamily::processRexmitTimer(TcpEventCode &event) {
     TcpTahoeRenoFamily::processRexmitTimer(event);
 
