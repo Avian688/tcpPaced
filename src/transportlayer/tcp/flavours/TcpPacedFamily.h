@@ -40,11 +40,21 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
 
     virtual uint32_t getSsthresh() { return state->ssthresh;};
 
+    virtual bool isRexmitTimer(const cMessage *msg) const { return msg == rexmitTimer; }
+
+    virtual simtime_t getRexmitTimerExpiry() const;
+
+    virtual bool shouldApplyRtoCongestionResponse() const { return applyRtoCongestionResponse; }
+
     virtual void notifyLost(){};
 
     virtual void rackLossDetected();
 
   protected:
+    bool applyRtoCongestionResponse = true;
+
+    virtual bool shouldEnterLossRecoveryOnDuplicateAck() const;
+    virtual void setRecoveryCongestionWindow();
 
     virtual void processRexmitTimer(TcpEventCode& event) override;
 };

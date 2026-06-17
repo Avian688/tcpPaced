@@ -15,6 +15,9 @@
 
 #include "TcpPacedFamily.h"
 
+#include <algorithm>
+#include <limits>
+
 namespace inet {
 namespace tcp {
 
@@ -50,23 +53,58 @@ bool TcpPacedFamily::sendData(bool sendCommandInvoked)
     return dynamic_cast<TcpPacedConnection*>(conn)->sendPendingData();
 }
 
+simtime_t TcpPacedFamily::getRexmitTimerExpiry() const
+{
+    return rexmitTimer != nullptr && rexmitTimer->isScheduled() ? rexmitTimer->getArrivalTime() : SIMTIME_MAX;
+}
+
 void TcpPacedFamily::rackLossDetected()
 {
     auto pacedConn = dynamic_cast<TcpPacedConnection *>(conn);
     if (!state->sack_enabled)
         return;
 
+    pacedConn->resetTailLossProbe();
+
     if (!state->lossRecovery) {
         state->recoveryPoint = state->snd_max;
         state->lossRecovery = true;
+        pacedConn->updateInFlight();
+        setRecoveryCongestionWindow();
     }
+    else
+        pacedConn->updateInFlight();
 
-    pacedConn->updateInFlight();
     if (pacedConn->doRetransmit())
         restartRexmitTimer();
 }
 
+bool TcpPacedFamily::shouldEnterLossRecoveryOnDuplicateAck() const
+{
+    auto pacedConn = dynamic_cast<TcpPacedConnection *>(conn);
+    if (pacedConn->isRackEnabled())
+        return false;
+
+    bool dupAckFallback = state->dupacks == state->dupthresh;
+    return state->sack_enabled && !state->lossRecovery &&
+            (dupAckFallback || pacedConn->isHeadLost());
+}
+
+void TcpPacedFamily::setRecoveryCongestionWindow()
+{
+    auto pacedConn = dynamic_cast<TcpPacedConnection *>(conn);
+    uint64_t recoveryCwnd = static_cast<uint64_t>(pacedConn->getBytesInFlight()) +
+            std::max(pacedConn->getLastAckedSackedBytes(), state->snd_mss);
+    state->snd_cwnd = static_cast<uint32_t>(
+            std::min(recoveryCwnd, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
+}
+
 void TcpPacedFamily::processRexmitTimer(TcpEventCode &event) {
+    const bool recoveryOutstanding = state->sack_enabled &&
+            state->recoveryPoint != 0 && seqLess(state->snd_una, state->recoveryPoint);
+    applyRtoCongestionResponse = !recoveryOutstanding;
+
+    dynamic_cast<TcpPacedConnection *>(conn)->resetRackTimersForRto();
     TcpTahoeRenoFamily::processRexmitTimer(event);
 
     dynamic_cast<TcpPacedConnection*>(conn)->setAllSackedLost();
@@ -74,6 +112,11 @@ void TcpPacedFamily::processRexmitTimer(TcpEventCode &event) {
 
     if (event == TCP_E_ABORT)
         return;
+
+    // Preserve the RTO recovery boundary so RACK does not apply another
+    // congestion response to losses from the same timeout episode.
+    if (state->sack_enabled)
+        state->recoveryPoint = state->snd_max;
 
     // After REXMIT timeout TCP Reno should start slow start with snd_cwnd = snd_mss.
     //

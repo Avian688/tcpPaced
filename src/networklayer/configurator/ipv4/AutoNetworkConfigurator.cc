@@ -142,15 +142,12 @@ void AutoNetworkConfigurator::reinvokeConfigurator(Topology& topology, cXMLEleme
         //for( auto & p : node->interfaceInfos ) delete p;
         node->interfaceInfos.clear();
         Ipv4RoutingTable *routingTable = dynamic_cast<Ipv4RoutingTable*>(node->routingTable);
-        for(int j = 0; j < routingTable->getNumRoutes(); j++){
-            //delete node->routingTable->routes;
-            //Ipv4RoutingTable *routingTable = dynamic_cast<Ipv4RoutingTable*>(node->routingTable); //TO DO, change it so it isnt restricted to ipv4
-            bool check = routingTable->deleteRoute(routingTable->getRoute(j));
+        while (routingTable->getNumRoutes() > 0) {
+            bool check = routingTable->deleteRoute(routingTable->getRoute(0));
             EV_DEBUG << check;
         }
-        for(int m = 0; m < node->routingTable->getNumMulticastRoutes(); m++){
-            node->routingTable->deleteMulticastRoute(node->routingTable->getMulticastRoute(m));
-        }
+        while (node->routingTable->getNumMulticastRoutes() > 0)
+            node->routingTable->deleteMulticastRoute(node->routingTable->getMulticastRoute(0));
         //routingTable->Ipv4RoutingTable;
         std::for_each(node->staticRoutes.begin(), node->staticRoutes.end(), []( Ipv4Route* route) { delete route; });
                 //for every route, pop each route off.
@@ -210,28 +207,31 @@ void AutoNetworkConfigurator::configureRoutingTable(Node *node)
     EV_DETAIL << "Configuring routing table of " << node->getModule()->getFullPath() << ".\n";
     for (size_t i = 0; i < node->staticRoutes.size(); i++) {
         Ipv4Route *original = node->staticRoutes[i];
-        Ipv4Route *clone = new Ipv4Route();
-        if(i < node->staticRoutes.size()){
-            bool dupe = false;
-            for (int j = 0; j < node->routingTable->getNumRoutes(); j++){
-                if(original->getDestinationAsGeneric() == node->routingTable->getRoute(j)->getDestinationAsGeneric()){
-                    node->routingTable->getRoute(j)->setNextHop(original->getNextHopAsGeneric()); //If the destination is already in the routing table, the destination will be updated with the new found better hop.
-                    dupe = true;
-                    delete clone;
-                }
+        bool duplicate = false;
+        for (int j = 0; j < node->routingTable->getNumRoutes(); j++) {
+            Ipv4Route *existing = dynamic_cast<Ipv4Route *>(node->routingTable->getRoute(j));
+            if (existing == nullptr)
+                continue;
+            if (original->getDestination() == existing->getDestination()
+                    && original->getNetmask() == existing->getNetmask()
+                    && original->getGateway() == existing->getGateway()
+                    && original->getInterface() == existing->getInterface()) {
+                duplicate = true;
+                break;
             }
-            if(dupe != true){ //If no duplication occurs, the link can be added as usual. Otherwise it is ignored.
-                clone->setMetric(original->getMetric());
-                clone->setSourceType(original->getSourceType());
-                clone->setSource(original->getSource());
-                clone->setDestination(original->getDestination());
-                clone->setNetmask(original->getNetmask());
-                clone->setGateway(original->getGateway());
-                clone->setInterface(original->getInterface());
-                node->routingTable->addRoute(clone);
-            }
-
         }
+        if (duplicate)
+            continue;
+
+        Ipv4Route *clone = new Ipv4Route();
+        clone->setMetric(original->getMetric());
+        clone->setSourceType(original->getSourceType());
+        clone->setSource(original->getSource());
+        clone->setDestination(original->getDestination());
+        clone->setNetmask(original->getNetmask());
+        clone->setGateway(original->getGateway());
+        clone->setInterface(original->getInterface());
+        node->routingTable->addRoute(clone);
     }
     /**
      * Multicast route implementation that is not used for the simulation model. This was implemented in case

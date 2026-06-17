@@ -37,6 +37,13 @@ namespace tcp {
 class TcpPacedFamily;
 
 class TcpPacedConnection : public TcpConnection {
+  protected:
+    enum class RackTimerMode {
+        NONE,
+        REORDERING,
+        LOSS_PROBE
+    };
+
 public:
     static simsignal_t throughputSignal;
     static simsignal_t mDeliveredSignal;
@@ -110,6 +117,8 @@ public:
 
     virtual uint32_t sendSegment(uint32_t bytes) override;
 
+    virtual void sendOneNewSegment(bool fullSegmentsOnly, uint32_t congestionWindow) override;
+
     virtual void changeIntersendingTime(simtime_t _intersendingTime);
 
     virtual simtime_t getPacingRate();
@@ -141,6 +150,8 @@ public:
     virtual bool nextSeg(uint32_t& seqNum, bool isRecovery);
 
     virtual bool checkIsLost(uint32_t seqNo);
+
+    virtual bool isHeadLost() const;
 
     virtual uint32_t getHighestRexmittedSeqNum();
 
@@ -174,16 +185,38 @@ public:
 
     virtual uint32_t getLastAckedSackedBytes() {return m_lastAckedSackedBytes;};
 
+    virtual bool isRackEnabled() const { return rack_enabled; }
+
     virtual void addSkbInfoTags(const Ptr<TcpHeader> &tcpHeader, uint32_t payloadBytes);
 
     virtual bool checkFackLoss();
 
     virtual bool checkRackLoss(bool *newLossDetected = nullptr);
 
+    virtual void resetTailLossProbe();
+
+    virtual void resetRackTimersForRto();
+
 protected:
     virtual void configureMechanismParameters();
 
     virtual TcpPacedFamily *getPacedAlgorithm() const;
+
+    virtual void armRackTimer(RackTimerMode mode, simtime_t delay);
+
+    virtual void clearRackTimer(RackTimerMode mode);
+
+    virtual void scheduleTailLossProbe();
+
+    virtual void sendTailLossProbe();
+
+    virtual bool processTailLossProbeAck(uint32_t ackNo, bool pureDuplicateAck, bool dsackForProbe);
+
+    virtual void clearTailLossProbe(bool cancelProbeTimer);
+
+    virtual bool isInRtoRecovery() const;
+
+    virtual bool shouldApplyRackCongestionResponse() const;
 
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;
@@ -234,6 +267,17 @@ protected:
     bool scoreboardUpdated;
 
     bool isRetransDataAcked;
+
+    RackTimerMode m_rackTimerMode = RackTimerMode::NONE;
+    bool m_tlpProbeOutstanding = false;
+    bool m_tlpIsRetransmission = false;
+    uint32_t m_tlpProbeBeginSeq = 0;
+    uint32_t m_tlpEndSeq = 0;
+    uint64_t m_rttSampleGeneration = 0;
+    uint64_t m_tlpLastProbeRttGeneration = 0;
+    bool m_tlpHasSentProbe = false;
+    bool m_sackOptionSeenForAck = false;
+    bool m_tlpDsackSeenForProbe = false;
 
     // Retransmission-rate accounting (count bytes when retransmissions are sent)
     simtime_t lastRetransmissionRateTime;
