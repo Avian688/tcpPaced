@@ -107,7 +107,6 @@ void TcpPacedFamily::processRexmitTimer(TcpEventCode &event) {
     dynamic_cast<TcpPacedConnection *>(conn)->resetRackTimersForRto();
     TcpTahoeRenoFamily::processRexmitTimer(event);
 
-    dynamic_cast<TcpPacedConnection*>(conn)->setAllSackedLost();
     dynamic_cast<TcpPacedConnection*>(conn)->updateInFlight();
 
     if (event == TCP_E_ABORT)

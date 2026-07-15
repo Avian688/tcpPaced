@@ -832,6 +832,10 @@ bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
 
     state->highRxt = rexmitQueue->getHighestRexmittedSeqNum();
     uint32_t highestSackedSeqNum = rexmitQueue->getHighestSackedSeqNum();
+    // RFC 6675 section 5.1 says NextSeg is inappropriate after an RTO. Walk
+    // all pre-RTO outstanding data so the oldest missing range is repaired
+    // before new data is selected, while still honoring fresh SACKs.
+    uint32_t retransmitSearchEnd = state->afterRto ? state->snd_max : highestSackedSeqNum;
     uint32_t shift = state->snd_mss;
     bool sacked = false;
     bool rexmitted = false;
@@ -841,7 +845,7 @@ bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
     bool isSeqPerRule3Valid = false;
 
     for (uint32_t s2 = rexmitQueue->getBufferStartSeq();
-         seqLess(s2, state->snd_max) && seqLess(s2, highestSackedSeqNum);
+         seqLess(s2, state->snd_max) && seqLess(s2, retransmitSearchEnd);
          s2 += shift)
     {
         rexmitQueue->checkSackBlockLost(s2, shift, sacked, rexmitted, lost);
@@ -873,7 +877,6 @@ bool TcpPacedConnection::nextSeg(uint32_t& seqNum, bool isRecovery)
 
     if (isSeqPerRule3Valid)
     {
-        std::cout << "\n WEIRD EDGE CASE HAPPENING" << endl;
         seqNum = seqPerRule3;
         nextSegSelectedRetransmission = true;          // rescue retransmission
         return true;
@@ -959,9 +962,6 @@ void TcpPacedConnection::skbDelivered(uint32_t seqNum)
         TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(seqNum);
         if (skbRegion.m_deliveredTime != SIMTIME_MAX) {
             m_delivered += skbRegion.endSeqNum - skbRegion.beginSeqNum;
-            if ((skbRegion.endSeqNum - skbRegion.beginSeqNum) != 1448)
-                std::cout << "\n AMOUNT DELIVERED" << skbRegion.endSeqNum - skbRegion.beginSeqNum << endl;
-
             m_deliveredTime = simTime();
 
             const bool isMostRecentDeliveredSkb = m_rateSample.m_priorDelivered == 0 ||
