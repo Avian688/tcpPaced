@@ -27,6 +27,96 @@ TcpPacedFamily::TcpPacedFamily()
 {
 }
 
+void TcpPacedFamily::initialize()
+{
+    TcpTahoeRenoFamily::initialize();
+    resetPrrRecovery();
+}
+
+void TcpPacedFamily::established(bool active)
+{
+    TcpTahoeRenoFamily::established(active);
+    resetPrrRecovery();
+}
+
+uint64_t TcpPacedFamily::packetsForBytes(uint64_t bytes) const
+{
+    if (bytes == 0 || state == nullptr || state->snd_mss == 0)
+        return 0;
+
+    return (bytes + state->snd_mss - 1) / state->snd_mss;
+}
+
+void TcpPacedFamily::beginPrrRecovery()
+{
+    if (!usesPrrRecovery() || state == nullptr || state->snd_mss == 0)
+        return;
+
+    prrActive = true;
+    prrDeliveredPackets = 0;
+    prrOutPackets = 0;
+    prrPriorCwndPackets = std::max<uint64_t>(state->snd_cwnd / state->snd_mss, 1);
+}
+
+void TcpPacedFamily::resetPrrRecovery()
+{
+    prrActive = false;
+    prrDeliveredPackets = 0;
+    prrOutPackets = 0;
+    prrPriorCwndPackets = 0;
+}
+
+void TcpPacedFamily::recoveryDataSent(uint32_t bytes)
+{
+    if (usesPrrRecovery() && prrActive && state != nullptr && state->lossRecovery)
+        prrOutPackets += packetsForBytes(bytes);
+}
+
+void TcpPacedFamily::updatePrrCongestionWindow(uint32_t newlyDeliveredBytes,
+        bool sndUnaAdvanced, uint32_t newlyLostBytes)
+{
+    if (!usesPrrRecovery() || !prrActive || state == nullptr ||
+            !state->lossRecovery || state->snd_mss == 0 || prrPriorCwndPackets == 0)
+        return;
+
+    const uint64_t newlyDeliveredPackets = packetsForBytes(newlyDeliveredBytes);
+    if (newlyDeliveredPackets == 0)
+        return;
+
+    prrDeliveredPackets += newlyDeliveredPackets;
+
+    const uint64_t inFlightPackets = packetsForBytes(state->pipe);
+    const uint64_t ssthreshPackets = std::max<uint64_t>(state->ssthresh / state->snd_mss, 1);
+    const int64_t delta = static_cast<int64_t>(ssthreshPackets) -
+            static_cast<int64_t>(inFlightPackets);
+
+    // RFC 6937 PRR-CRB above ssthresh and PRR-SSRB at or below ssthresh.
+    uint64_t sendCount = 0;
+    if (delta < 0) {
+        const uint64_t targetOut =
+                (ssthreshPackets * prrDeliveredPackets + prrPriorCwndPackets - 1) /
+                prrPriorCwndPackets;
+        if (targetOut > prrOutPackets)
+            sendCount = targetOut - prrOutPackets;
+    }
+    else {
+        const uint64_t deliveredCredit = prrDeliveredPackets > prrOutPackets ?
+                prrDeliveredPackets - prrOutPackets : 0;
+        sendCount = std::max(deliveredCredit, newlyDeliveredPackets);
+        if (sndUnaAdvanced && newlyLostBytes == 0)
+            sendCount++;
+        sendCount = std::min(sendCount, static_cast<uint64_t>(delta));
+    }
+
+    if (prrOutPackets == 0)
+        sendCount = std::max<uint64_t>(sendCount, 1);
+
+    const uint64_t recoveryCwnd = static_cast<uint64_t>(state->pipe) +
+            sendCount * state->snd_mss;
+    state->snd_cwnd = static_cast<uint32_t>(
+            std::min(recoveryCwnd, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
+}
+
 
 bool TcpPacedFamily::sendData(bool sendCommandInvoked)
 {
@@ -66,16 +156,19 @@ void TcpPacedFamily::rackLossDetected()
 
     pacedConn->resetTailLossProbe();
 
+    bool enteredRecovery = false;
     if (!state->lossRecovery) {
         state->recoveryPoint = state->snd_max;
         state->lossRecovery = true;
         pacedConn->updateInFlight();
+        beginPrrRecovery();
         setRecoveryCongestionWindow();
+        enteredRecovery = true;
     }
     else
         pacedConn->updateInFlight();
 
-    if (pacedConn->doRetransmit())
+    if ((!usesPrrRecovery() || enteredRecovery) && pacedConn->doRetransmit())
         restartRexmitTimer();
 }
 
@@ -100,6 +193,7 @@ void TcpPacedFamily::setRecoveryCongestionWindow()
 }
 
 void TcpPacedFamily::processRexmitTimer(TcpEventCode &event) {
+    resetPrrRecovery();
     const bool recoveryOutstanding = state->sack_enabled &&
             state->recoveryPoint != 0 && seqLess(state->snd_una, state->recoveryPoint);
     applyRtoCongestionResponse = !recoveryOutstanding;
@@ -107,6 +201,7 @@ void TcpPacedFamily::processRexmitTimer(TcpEventCode &event) {
     dynamic_cast<TcpPacedConnection *>(conn)->resetRackTimersForRto();
     TcpTahoeRenoFamily::processRexmitTimer(event);
 
+    dynamic_cast<TcpPacedConnection *>(conn)->setAllSackedLost();
     dynamic_cast<TcpPacedConnection*>(conn)->updateInFlight();
 
     if (event == TCP_E_ABORT)

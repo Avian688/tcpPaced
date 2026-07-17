@@ -16,6 +16,8 @@
 #ifndef INET_TRANSPORTLAYER_TCP_FLAVOURS_TCPPACEDFAMILY_H_
 #define INET_TRANSPORTLAYER_TCP_FLAVOURS_TCPPACEDFAMILY_H_
 
+#include <cstdint>
+
 #include "../TcpPacedConnection.h"
 #include "inet/transportlayer/tcp/flavours/TcpTahoeRenoFamily.h"
 
@@ -26,9 +28,28 @@ namespace tcp {
  */
 class TcpPacedFamily : public TcpTahoeRenoFamily
 {
+  protected:
+    bool prrActive = false;
+    uint64_t prrDeliveredPackets = 0;
+    uint64_t prrOutPackets = 0;
+    uint64_t prrPriorCwndPackets = 0;
+
+    // Loss-based algorithms opt in; model-based algorithms keep their own recovery control.
+    virtual bool usesPrrRecovery() const { return false; }
+    virtual uint64_t packetsForBytes(uint64_t bytes) const;
+    virtual void beginPrrRecovery();
+    virtual void resetPrrRecovery();
+    virtual void updatePrrCongestionWindow(uint32_t newlyDeliveredBytes,
+                                           bool sndUnaAdvanced,
+                                           uint32_t newlyLostBytes);
+
   public:
     /** Ctor */
     TcpPacedFamily();
+
+    virtual void initialize() override;
+
+    virtual void established(bool active) override;
 
     virtual bool sendData(bool sendCommandInvoked) override;
 
@@ -49,6 +70,8 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
     virtual void notifyLost(){};
 
     virtual void rackLossDetected();
+
+    virtual void recoveryDataSent(uint32_t bytes);
 
   protected:
     bool applyRtoCongestionResponse = true;

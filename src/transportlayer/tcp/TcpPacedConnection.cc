@@ -737,6 +737,14 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
     return false;
 }
 
+uint32_t TcpPacedConnection::sendSegmentDuringLossRecoveryPhase(uint32_t seqNum)
+{
+    const uint32_t sentBytes = TcpConnection::sendSegmentDuringLossRecoveryPhase(seqNum);
+    if (sentBytes > 0)
+        getPacedAlgorithm()->recoveryDataSent(sentBytes);
+    return sentBytes;
+}
+
 bool TcpPacedConnection::doRetransmit()
 {
     uint32_t seqNum;

@@ -110,6 +110,8 @@ protected:
 
     virtual bool processSACKOption(const Ptr<const TcpHeader>& tcpHeader, const TcpOptionSack& option) override;
 
+    virtual uint32_t sendSegmentDuringLossRecoveryPhase(uint32_t seqNum) override;
+
 public:
     virtual bool processTimer(cMessage *msg) override;
 
