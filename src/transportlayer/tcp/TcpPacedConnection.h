@@ -189,6 +189,8 @@ public:
 
     virtual bool isRackEnabled() const { return rack_enabled; }
 
+    virtual bool isRackTimerLossDetection() const { return m_rackTimerLossDetection; }
+
     virtual void addSkbInfoTags(const Ptr<TcpHeader> &tcpHeader, uint32_t payloadBytes);
 
     virtual bool checkFackLoss();
@@ -219,6 +221,9 @@ protected:
     virtual bool isInRtoRecovery() const;
 
     virtual bool shouldApplyRackCongestionResponse() const;
+
+    virtual uint32_t getNewlyDetectedLostBytes(uint64_t previousTotalDetectedLostBytes,
+                                               bool lossDetected) const;
 
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;
@@ -280,6 +285,7 @@ protected:
     bool m_tlpHasSentProbe = false;
     bool m_sackOptionSeenForAck = false;
     bool m_tlpDsackSeenForProbe = false;
+    bool m_rackTimerLossDetection = false;
 
     // Retransmission-rate accounting (count bytes when retransmissions are sent)
     simtime_t lastRetransmissionRateTime;

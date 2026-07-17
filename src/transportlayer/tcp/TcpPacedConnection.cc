@@ -8,6 +8,7 @@
 #include "TcpPacedConnection.h"
 #include "TcpPaced.h"
 #include <algorithm>
+#include <limits>
 #include <inet/transportlayer/tcp/TcpSendQueue.h>
 #include <inet/transportlayer/tcp/TcpAlgorithm.h>
 #include <inet/transportlayer/tcp/TcpReceiveQueue.h>
@@ -236,7 +237,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 {
     EV_DETAIL << "Processing ACK in a data transfer state\n";
     uint64_t previousDelivered = m_delivered;
-    uint32_t previousLost = m_bytesLoss;
+    uint64_t previousTotalDetectedLostBytes = getTotalDetectedLostBytes();
     uint32_t priorInFlight = m_bytesInFlight;
     int payloadLength = tcpSegment->getByteLength() - B(tcpHeader->getHeaderLength()).get();
     beginRateSample();
@@ -298,15 +299,14 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
             uint32_t currentDelivered  = m_delivered - previousDelivered;
             m_lastAckedSackedBytes = currentDelivered;
 
-            updateInFlight();
-
-            uint32_t currentLost = m_bytesLoss;
-            uint32_t lost = (currentLost > previousLost) ? currentLost - previousLost : 0;
-
-            updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
-
             bool newRackLoss = false;
             bool rackRecovery = checkRackLoss(&newRackLoss);
+            updateInFlight();
+
+            uint32_t lost = getNewlyDetectedLostBytes(
+                    previousTotalDetectedLostBytes, newRackLoss || tlpRecoveredLoss);
+            updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
+
             if (shouldApplyRackCongestionResponse() &&
                     (rackRecovery || newRackLoss || tlpRecoveredLoss))
                 getPacedAlgorithm()->rackLossDetected();
@@ -391,15 +391,14 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
             uint32_t currentDelivered  = m_delivered - previousDelivered;
             m_lastAckedSackedBytes = currentDelivered;
 
-            updateInFlight();
-
-            uint32_t currentLost = m_bytesLoss;
-            uint32_t lost = (currentLost > previousLost) ? currentLost - previousLost : 0;
-
-            updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
-
             bool newRackLoss = false;
             bool rackRecovery = checkRackLoss(&newRackLoss);
+            updateInFlight();
+
+            uint32_t lost = getNewlyDetectedLostBytes(
+                    previousTotalDetectedLostBytes, newRackLoss || tlpRecoveredLoss);
+            updateSample(currentDelivered, lost, false, priorInFlight, connMinRtt);
+
             if (shouldApplyRackCongestionResponse() &&
                     (rackRecovery || newRackLoss || tlpRecoveredLoss))
                 getPacedAlgorithm()->rackLossDetected();
@@ -473,8 +472,11 @@ bool TcpPacedConnection::processTimer(cMessage *msg)
         if (rack_enabled && expiredMode == RackTimerMode::REORDERING) {
             bool newRackLoss = false;
             bool rackRecovery = checkRackLoss(&newRackLoss);
-            if (shouldApplyRackCongestionResponse() && (rackRecovery || newRackLoss))
+            if (shouldApplyRackCongestionResponse() && (rackRecovery || newRackLoss)) {
+                m_rackTimerLossDetection = true;
                 getPacedAlgorithm()->rackLossDetected();
+                m_rackTimerLossDetection = false;
+            }
         }
         else if (rack_enabled && expiredMode == RackTimerMode::LOSS_PROBE)
             sendTailLossProbe();
@@ -677,6 +679,13 @@ void TcpPacedConnection::sendOneNewSegment(bool fullSegmentsOnly, uint32_t conge
 
 bool TcpPacedConnection::sendPendingData()
 {
+    if (!pace && state->lossRecovery) {
+        bool dataSent = false;
+        while (sendDataDuringLossRecovery(getPacedAlgorithm()->getCwnd()))
+            dataSent = true;
+        return dataSent;
+    }
+
     if (!pace)
         return sendData(getPacedAlgorithm()->getCwnd());
 
@@ -1025,6 +1034,24 @@ uint64_t TcpPacedConnection::getTotalDetectedLostBytes() const
     return rexmitQueue == nullptr ? 0 : rexmitQueue->getTotalDetectedLostBytes();
 }
 
+uint32_t TcpPacedConnection::getNewlyDetectedLostBytes(
+        uint64_t previousTotalDetectedLostBytes, bool lossDetected) const
+{
+    const uint64_t currentTotalDetectedLostBytes = getTotalDetectedLostBytes();
+    uint64_t newlyDetectedLostBytes =
+            currentTotalDetectedLostBytes > previousTotalDetectedLostBytes ?
+            currentTotalDetectedLostBytes - previousTotalDetectedLostBytes : 0;
+
+    // A retransmission can be declared lost while its region is already marked
+    // lost. Preserve Linux's non-zero newly_lost signal for PRR-SSRB in that case.
+    if (newlyDetectedLostBytes == 0 && lossDetected)
+        newlyDetectedLostBytes = state != nullptr ? std::max(state->snd_mss, 1U) : 1U;
+
+    return static_cast<uint32_t>(std::min(
+            newlyDetectedLostBytes,
+            static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())));
+}
+
 void TcpPacedConnection::updateLossNotificationSample()
 {
     m_lossNotificationSample = {};
@@ -1286,6 +1313,7 @@ void TcpPacedConnection::resetTailLossProbe()
 
 void TcpPacedConnection::resetRackTimersForRto()
 {
+    m_rackTimerLossDetection = false;
     clearRackTimer(RackTimerMode::REORDERING);
     clearTailLossProbe(true);
 }

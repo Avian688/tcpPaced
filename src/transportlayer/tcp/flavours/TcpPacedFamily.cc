@@ -168,8 +168,18 @@ void TcpPacedFamily::rackLossDetected()
     else
         pacedConn->updateInFlight();
 
-    if ((!usesPrrRecovery() || enteredRecovery) && pacedConn->doRetransmit())
-        restartRexmitTimer();
+    if (!usesPrrRecovery()) {
+        if (pacedConn->doRetransmit())
+            restartRexmitTimer();
+    }
+    else if (pacedConn->isRackTimerLossDetection()) {
+        if (enteredRecovery) {
+            if (pacedConn->doRetransmit())
+                restartRexmitTimer();
+        }
+        else
+            pacedConn->sendPendingData();
+    }
 }
 
 bool TcpPacedFamily::shouldEnterLossRecoveryOnDuplicateAck() const
@@ -186,6 +196,14 @@ bool TcpPacedFamily::shouldEnterLossRecoveryOnDuplicateAck() const
 void TcpPacedFamily::setRecoveryCongestionWindow()
 {
     auto pacedConn = dynamic_cast<TcpPacedConnection *>(conn);
+
+    // Linux's RACK reordering timer seeds PRR with one synthetic delivered
+    // packet before retransmitting because no ACK is being processed.
+    if (usesPrrRecovery() && pacedConn->isRackTimerLossDetection()) {
+        updatePrrCongestionWindow(state->snd_mss, false, 0);
+        return;
+    }
+
     uint64_t recoveryCwnd = static_cast<uint64_t>(pacedConn->getBytesInFlight()) +
             std::max(pacedConn->getLastAckedSackedBytes(), state->snd_mss);
     state->snd_cwnd = static_cast<uint32_t>(
