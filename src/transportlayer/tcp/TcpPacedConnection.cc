@@ -121,6 +121,7 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
     m_rateDelivered = 0;
 
     m_lastAckedSackedBytes = 0;
+    m_newlySackedBytesForAck = 0;
     bytesRcvd = 0;
 
     m_rateSample.m_ackElapsed = 0;
@@ -236,6 +237,10 @@ void TcpPacedConnection::configureStateVariables()
 bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<const TcpHeader>& tcpHeader)
 {
     EV_DETAIL << "Processing ACK in a data transfer state\n";
+    // Options are parsed before this callback. Preserve delivery recorded
+    // while parsing this ACK's SACK blocks for rate sampling and PRR.
+    const uint32_t newlySackedBytes = m_newlySackedBytesForAck;
+    m_newlySackedBytesForAck = 0;
     uint64_t previousDelivered = m_delivered;
     uint64_t previousTotalDetectedLostBytes = getTotalDetectedLostBytes();
     uint32_t priorInFlight = m_bytesInFlight;
@@ -296,7 +301,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
                 }
             }
 
-            uint32_t currentDelivered  = m_delivered - previousDelivered;
+            uint32_t currentDelivered = newlySackedBytes + (m_delivered - previousDelivered);
             m_lastAckedSackedBytes = currentDelivered;
 
             bool newRackLoss = false;
@@ -388,7 +393,7 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
         updateWndInfo(tcpHeader);
 
         if (payloadLength == 0 && fsm.getState() != TCP_S_SYN_RCVD) {
-            uint32_t currentDelivered  = m_delivered - previousDelivered;
+            uint32_t currentDelivered = newlySackedBytes + (m_delivered - previousDelivered);
             m_lastAckedSackedBytes = currentDelivered;
 
             bool newRackLoss = false;
@@ -471,7 +476,7 @@ bool TcpPacedConnection::processTimer(cMessage *msg)
         m_rackTimerMode = RackTimerMode::NONE;
         if (rack_enabled && expiredMode == RackTimerMode::REORDERING) {
             bool newRackLoss = false;
-            bool rackRecovery = checkRackLoss(&newRackLoss);
+            bool rackRecovery = checkRackLoss(&newRackLoss, true);
             if (shouldApplyRackCongestionResponse() && (rackRecovery || newRackLoss)) {
                 m_rackTimerLossDetection = true;
                 getPacedAlgorithm()->rackLossDetected();
@@ -1076,9 +1081,15 @@ void TcpPacedConnection::rackAdvance(uint32_t endSeqNo, const Ptr<const TcpHeade
         return;
 
     TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(endSeqNo);
+    // Repeated SACK blocks may revisit this region; only first delivery
+    // advances Linux RACK's delivered-packet timeline.
+    const bool newlyDelivered = skbRegion.m_deliveredTime != SIMTIME_MAX;
     if (m_rack->updateStats(getTSecr(tcpHeader), skbRegion.rexmitted, skbRegion.m_lastSentTime,
-            endSeqNo, state->snd_nxt, getPacedAlgorithm()->getRtt()))
+            endSeqNo, state->snd_nxt, getPacedAlgorithm()->getRtt())) {
         m_rttSampleGeneration++;
+        if (newlyDelivered)
+            m_rack->markAdvanced();
+    }
 }
 
 void TcpPacedConnection::beginRateSample()
@@ -1168,6 +1179,8 @@ bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader
         return false;
     }
 
+    const uint32_t deliveredBeforeSack = m_delivered;
+
     if (n > 0) {
         EV_INFO << n << " SACK(s) received:\n";
         for (uint i = 0; i < n; i++) {
@@ -1235,6 +1248,10 @@ bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader
 
         emit(sackedBytesSignal, state->sackedBytes);
     }
+
+    // processAckInEstabEtc() snapshots m_delivered after TCP options have
+    // already been handled, so carry this ACK's newly SACKed bytes across.
+    m_newlySackedBytesForAck += m_delivered - deliveredBeforeSack;
     return true;
 }
 
@@ -1445,8 +1462,21 @@ bool TcpPacedConnection::processTailLossProbeAck(uint32_t ackNo, bool pureDuplic
 
 bool TcpPacedConnection::checkRackLoss(bool *newLossDetected)
 {
+    return checkRackLoss(newLossDetected, false);
+}
+
+bool TcpPacedConnection::checkRackLoss(bool *newLossDetected, bool forceScan)
+{
     if (!rack_enabled || !rexmitQueue->isUpdatedSackEnabled())
         return false;
+
+    // Match Linux tcp_rack_mark_lost(): an ACK-path scan needs newly
+    // delivered evidence. Timer expiry calls this with forceScan=true.
+    if (!forceScan && !m_rack->consumeAdvanced()) {
+        if (newLossDetected)
+            *newLossDetected = false;
+        return false;
+    }
 
     if (!m_tlpProbeOutstanding && rexmitQueue->getTotalAmountOfSackedBytes() != 0)
         clearRackTimer(RackTimerMode::LOSS_PROBE);

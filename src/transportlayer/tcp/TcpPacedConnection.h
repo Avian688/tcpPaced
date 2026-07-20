@@ -197,6 +197,8 @@ public:
 
     virtual bool checkRackLoss(bool *newLossDetected = nullptr);
 
+    bool checkRackLoss(bool *newLossDetected, bool forceScan);
+
     virtual void resetTailLossProbe();
 
     virtual void resetRackTimersForRto();
@@ -245,6 +247,7 @@ protected:
 
 
     uint32_t m_lastAckedSackedBytes;
+    uint32_t m_newlySackedBytesForAck = 0;
 
     uint32_t m_delivered;
     simtime_t m_deliveredTime;
