@@ -274,8 +274,6 @@ protected:
     TcpRack *m_rack;
     bool m_dsackSeen;
 
-    bool scoreboardUpdated;
-
     bool isRetransDataAcked;
 
     RackTimerMode m_rackTimerMode = RackTimerMode::NONE;

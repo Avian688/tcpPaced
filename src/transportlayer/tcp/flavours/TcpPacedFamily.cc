@@ -156,30 +156,20 @@ void TcpPacedFamily::rackLossDetected()
 
     pacedConn->resetTailLossProbe();
 
-    bool enteredRecovery = false;
     if (!state->lossRecovery) {
         state->recoveryPoint = state->snd_max;
         state->lossRecovery = true;
         pacedConn->updateInFlight();
         beginPrrRecovery();
         setRecoveryCongestionWindow();
-        enteredRecovery = true;
     }
     else
         pacedConn->updateInFlight();
 
-    if (!usesPrrRecovery()) {
-        if (pacedConn->doRetransmit())
-            restartRexmitTimer();
-    }
-    else if (pacedConn->isRackTimerLossDetection()) {
-        if (enteredRecovery) {
-            if (pacedConn->doRetransmit())
-                restartRexmitTimer();
-        }
-        else
-            pacedConn->sendPendingData();
-    }
+    // ACK processing invokes this callback before its normal paced send.
+    // A RACK timer has no later ACK send phase, so run that same path here.
+    if (pacedConn->isRackTimerLossDetection())
+        pacedConn->sendPendingData();
 }
 
 bool TcpPacedFamily::shouldEnterLossRecoveryOnDuplicateAck() const

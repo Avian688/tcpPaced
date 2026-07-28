@@ -100,8 +100,6 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
     m_rateAppLimited = false;
     m_txItemDelivered = 0;
 
-    scoreboardUpdated = false;
-
     m_bytesInFlight = 0;
     m_bytesLoss = 0;
 
@@ -271,16 +269,6 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 
             if (rack_enabled)
             {
-                if (!scoreboardUpdated && rexmitQueue->findRegion(tcpHeader->getAckNo()))
-                {
-                    rackAdvance(tcpHeader->getAckNo(), tcpHeader);
-                }
-                else
-                {
-                    uint32_t highestSacked = rexmitQueue->getHighestSackedSeqNum();
-                    rackAdvance(highestSacked, tcpHeader);
-                }
-
                 const bool inLossState = state->lossRecovery || isInRtoRecovery();
                 const bool exiting = inLossState &&
                         seqGE(tcpHeader->getAckNo(), getPacedAlgorithm()->getRecoveryPoint());
@@ -289,8 +277,6 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
                                      rexmitQueue->getTotalAmountOfSackedBytes(), 3, state->snd_mss,
                                      exiting, inLossState);
             }
-            scoreboardUpdated = false;
-
             updateWndInfo(tcpHeader);
 
             if (rexmitQueue->isUpdatedSackEnabled()) {
@@ -351,16 +337,6 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
 
         if (rack_enabled)
         {
-            if (!scoreboardUpdated && rexmitQueue->findRegion(tcpHeader->getAckNo()))
-            {
-                rackAdvance(tcpHeader->getAckNo(), tcpHeader);
-            }
-            else
-            {
-                uint32_t highestSacked = rexmitQueue->getHighestSackedSeqNum();
-                rackAdvance(highestSacked, tcpHeader);
-            }
-
             const bool inLossState = state->lossRecovery || isInRtoRecovery();
             const bool exiting = inLossState &&
                     seqGE(state->snd_una, getPacedAlgorithm()->getRecoveryPoint());
@@ -369,8 +345,6 @@ bool TcpPacedConnection::processAckInEstabEtc(Packet *tcpSegment, const Ptr<cons
                                  rexmitQueue->getTotalAmountOfSackedBytes(), 3, state->snd_mss,
                                  exiting, inLossState);
         }
-        scoreboardUpdated = false;
-
         if (rexmitQueue->isUpdatedSackEnabled()) {
             std::list<uint32_t> skbDeliveredList = rexmitQueue->getDiscardList(discardUpToSeq);
             for (uint32_t endSeqNo : skbDeliveredList) {
@@ -1081,15 +1055,13 @@ void TcpPacedConnection::rackAdvance(uint32_t endSeqNo, const Ptr<const TcpHeade
         return;
 
     TcpSackRexmitQueue::Region& skbRegion = rexmitQueue->getRegion(endSeqNo);
-    // Repeated SACK blocks may revisit this region; only first delivery
-    // advances Linux RACK's delivered-packet timeline.
-    const bool newlyDelivered = skbRegion.m_deliveredTime != SIMTIME_MAX;
-    if (m_rack->updateStats(getTSecr(tcpHeader), skbRegion.rexmitted, skbRegion.m_lastSentTime,
-            endSeqNo, state->snd_nxt, getPacedAlgorithm()->getRtt())) {
+    // Linux advances RACK only when this ACK newly delivers the packet.
+    if (skbRegion.m_deliveredTime == SIMTIME_MAX)
+        return;
+
+    if (m_rack->updateStats(getTSecr(tcpHeader), skbRegion.everRetransmitted, skbRegion.m_lastSentTime,
+            endSeqNo, state->snd_nxt, getPacedAlgorithm()->getRtt()))
         m_rttSampleGeneration++;
-        if (newlyDelivered)
-            m_rack->markAdvanced();
-    }
 }
 
 void TcpPacedConnection::beginRateSample()
@@ -1216,9 +1188,8 @@ bool TcpPacedConnection::processSACKOption(const Ptr<const TcpHeader>& tcpHeader
 
             if (seqGreater(tmp.getEnd(), tcpHeader->getAckNo()) && seqGreater(tmp.getEnd(), state->snd_una)) {
                 std::list<uint32_t> skbDeliveredList = rexmitQueue->setSackedBitList(tmp.getStart(), tmp.getEnd());
-                scoreboardUpdated = true;
                 for (uint32_t endSeqNo : skbDeliveredList) {
-                    bool wasRetransmitted = rexmitQueue->isRetransmitted(endSeqNo);
+                    bool wasRetransmitted = rexmitQueue->getRegion(endSeqNo).everRetransmitted;
                     rackAdvance(endSeqNo, tcpHeader);
                     if (fack_enabled || rack_enabled) {
                         if (endSeqNo > m_sndFack)
