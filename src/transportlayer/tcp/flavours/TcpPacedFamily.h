@@ -65,6 +65,12 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
 
     virtual simtime_t getRexmitTimerExpiry() const;
 
+    virtual simtime_t getRexmitTimeout() const { return state->rexmit_timeout; }
+
+    virtual void suspendRexmitTimerForRack();
+
+    virtual void rearmRexmitTimerAfterRack(simtime_t delay);
+
     virtual bool shouldApplyRtoCongestionResponse() const { return applyRtoCongestionResponse; }
 
     virtual void notifyLost(){};

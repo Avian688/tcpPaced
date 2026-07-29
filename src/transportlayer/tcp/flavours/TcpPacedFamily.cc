@@ -148,6 +148,24 @@ simtime_t TcpPacedFamily::getRexmitTimerExpiry() const
     return rexmitTimer != nullptr && rexmitTimer->isScheduled() ? rexmitTimer->getArrivalTime() : SIMTIME_MAX;
 }
 
+void TcpPacedFamily::suspendRexmitTimerForRack()
+{
+    if (rexmitTimer != nullptr && rexmitTimer->isScheduled())
+        cancelEvent(rexmitTimer);
+}
+
+void TcpPacedFamily::rearmRexmitTimerAfterRack(simtime_t delay)
+{
+    if (rexmitTimer == nullptr || state == nullptr || state->snd_una == state->snd_max)
+        return;
+
+    if (rexmitTimer->isScheduled())
+        cancelEvent(rexmitTimer);
+
+    const simtime_t timerEpsilon(1, SIMTIME_NS);
+    conn->scheduleAfter(std::max(delay, timerEpsilon), rexmitTimer);
+}
+
 void TcpPacedFamily::rackLossDetected()
 {
     auto pacedConn = dynamic_cast<TcpPacedConnection *>(conn);
