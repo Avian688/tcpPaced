@@ -65,11 +65,11 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
 
     virtual simtime_t getRexmitTimerExpiry() const;
 
-    virtual simtime_t getRexmitTimeout() const { return state->rexmit_timeout; }
+    // Recovery retransmissions must not postpone an RTO already in progress.
+    void preserveRexmitTimerExpiry(simtime_t expiry);
 
-    virtual void suspendRexmitTimerForRack();
-
-    virtual void rearmRexmitTimerAfterRack(simtime_t delay);
+    // Congestion-control flavours live in separate dylibs; keep these out of the vtable.
+    simtime_t getRexmitTimeout() const { return state->rexmit_timeout; }
 
     virtual bool shouldApplyRtoCongestionResponse() const { return applyRtoCongestionResponse; }
 

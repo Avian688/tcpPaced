@@ -77,6 +77,14 @@ public:
 
     struct LossNotificationSample {
       bool m_valid = false;
+      uint32_t m_bytesLoss = 0;
+      uint32_t m_txInFlight = 0;
+      bool m_isAppLimited = false;
+      };
+
+    // Keep detailed samples out of TcpPacedConnection's stored object layout.
+    struct DetailedLossNotificationSample {
+      bool m_valid = false;
       uint32_t m_lostPacketBytes = 0;
       uint32_t m_bytesLoss = 0;
       uint32_t m_txInFlight = 0;
@@ -177,7 +185,8 @@ public:
 
     virtual LossNotificationSample consumeLossNotificationSample();
 
-    virtual std::vector<LossNotificationSample> consumeLossNotificationSamples();
+    // Protocol connections live in separate dylibs, so this must not add a vtable slot.
+    std::vector<DetailedLossNotificationSample> consumeLossNotificationSamples();
 
     virtual uint32_t getBytesInFlight() {return m_bytesInFlight;};
 
@@ -215,10 +224,6 @@ protected:
     virtual void armRackTimer(RackTimerMode mode, simtime_t delay);
 
     virtual void clearRackTimer(RackTimerMode mode);
-
-    virtual void suspendRtoForRack();
-
-    virtual void releaseRtoAfterRack();
 
     virtual void scheduleTailLossProbe();
 
@@ -265,7 +270,6 @@ protected:
 
     RateSample m_rateSample;
     LossNotificationSample m_lossNotificationSample;
-    std::vector<LossNotificationSample> m_lossNotificationSamples;
     uint32_t m_bytesInFlight;
     uint32_t m_bytesLoss;
 
@@ -296,7 +300,6 @@ protected:
     bool m_sackOptionSeenForAck = false;
     bool m_tlpDsackSeenForProbe = false;
     bool m_rackTimerLossDetection = false;
-    bool m_rackOwnsRto = false;
 
     // Retransmission-rate accounting (count bytes when retransmissions are sent)
     simtime_t lastRetransmissionRateTime;

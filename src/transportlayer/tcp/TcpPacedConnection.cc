@@ -137,8 +137,6 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
     m_rateSample.m_lastSentTime = 0;
     m_rateSample.m_lastEndSeq = 0;
     m_lossNotificationSample = {};
-    m_lossNotificationSamples.clear();
-    m_rackOwnsRto = false;
 
     // sender-side retransmission accounting
     prevLastTotalRetransmittedBytes = 0;
@@ -193,8 +191,6 @@ void TcpPacedConnection::initClonedConnection(TcpConnection *listenerConn)
     m_rateSample.m_lastSentTime = 0;
     m_rateSample.m_lastEndSeq = 0;
     m_lossNotificationSample = {};
-    m_lossNotificationSamples.clear();
-    m_rackOwnsRto = false;
 
     // Keep separate timers: throughput (receiver-side bytesRcvd) and retransmissionRate (sender-side send counting)
     scheduleAt(simTime() + throughputInterval, throughputTimer);
@@ -460,8 +456,6 @@ bool TcpPacedConnection::processTimer(cMessage *msg)
                 getPacedAlgorithm()->rackLossDetected();
                 m_rackTimerLossDetection = false;
             }
-            if (m_rackTimerMode != RackTimerMode::REORDERING)
-                releaseRtoAfterRack();
         }
         else if (rack_enabled && expiredMode == RackTimerMode::LOSS_PROBE)
             sendTailLossProbe();
@@ -688,9 +682,6 @@ bool TcpPacedConnection::sendPendingData()
         }
     }
 
-    if (m_rackTimerMode == RackTimerMode::REORDERING)
-        suspendRtoForRack();
-
     return dataSent;
 }
 
@@ -733,9 +724,16 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
 
 uint32_t TcpPacedConnection::sendSegmentDuringLossRecoveryPhase(uint32_t seqNum)
 {
+    const bool isRetransmission = seqLess(seqNum, state->snd_max);
+    const simtime_t rexmitTimerExpiry = isRetransmission ?
+            getPacedAlgorithm()->getRexmitTimerExpiry() : SIMTIME_MAX;
+
     const uint32_t sentBytes = TcpConnection::sendSegmentDuringLossRecoveryPhase(seqNum);
-    if (sentBytes > 0)
+    if (sentBytes > 0) {
+        if (isRetransmission)
+            getPacedAlgorithm()->preserveRexmitTimerExpiry(rexmitTimerExpiry);
         getPacedAlgorithm()->recoveryDataSent(sentBytes);
+    }
     return sentBytes;
 }
 
@@ -1044,33 +1042,15 @@ uint32_t TcpPacedConnection::getNewlyDetectedLostBytes(
 void TcpPacedConnection::updateLossNotificationSample()
 {
     m_lossNotificationSample = {};
-    m_lossNotificationSamples.clear();
 
-    uint64_t totalLostPacketBytes = 0;
-    uint32_t maxTxInFlight = 0;
-    bool allAppLimited = true;
-    for (const auto& loss : rexmitQueue->getRecentLossSamples()) {
-        LossNotificationSample sample;
-        sample.m_valid = true;
-        sample.m_lostPacketBytes = loss.m_lostPacketBytes;
-        sample.m_bytesLoss = loss.m_lostBytesSinceSend;
-        sample.m_txInFlight = loss.m_txInFlight;
-        sample.m_isAppLimited = loss.m_isAppLimited;
-        m_lossNotificationSamples.push_back(sample);
-
-        totalLostPacketBytes += loss.m_lostPacketBytes;
-        maxTxInFlight = std::max(maxTxInFlight, loss.m_txInFlight);
-        allAppLimited = allAppLimited && loss.m_isAppLimited;
-    }
-
-    if (!m_lossNotificationSamples.empty()) {
-        const uint32_t aggregateLostBytes = static_cast<uint32_t>(std::min<uint64_t>(
-                totalLostPacketBytes, std::numeric_limits<uint32_t>::max()));
+    uint32_t txInFlight = 0;
+    uint32_t lostBytes = 0;
+    bool isAppLimited = false;
+    if (rexmitQueue->getRecentLossSample(txInFlight, lostBytes, isAppLimited)) {
         m_lossNotificationSample.m_valid = true;
-        m_lossNotificationSample.m_lostPacketBytes = aggregateLostBytes;
-        m_lossNotificationSample.m_bytesLoss = aggregateLostBytes;
-        m_lossNotificationSample.m_txInFlight = maxTxInFlight;
-        m_lossNotificationSample.m_isAppLimited = allAppLimited;
+        m_lossNotificationSample.m_bytesLoss = lostBytes;
+        m_lossNotificationSample.m_txInFlight = txInFlight;
+        m_lossNotificationSample.m_isAppLimited = isAppLimited;
     }
 }
 
@@ -1149,14 +1129,27 @@ TcpPacedConnection::LossNotificationSample TcpPacedConnection::consumeLossNotifi
 {
     auto sample = m_lossNotificationSample;
     m_lossNotificationSample = {};
-    m_lossNotificationSamples.clear();
     return sample;
 }
 
-std::vector<TcpPacedConnection::LossNotificationSample> TcpPacedConnection::consumeLossNotificationSamples()
+std::vector<TcpPacedConnection::DetailedLossNotificationSample>
+TcpPacedConnection::consumeLossNotificationSamples()
 {
-    auto samples = m_lossNotificationSamples;
-    m_lossNotificationSamples.clear();
+    std::vector<DetailedLossNotificationSample> samples;
+    if (rexmitQueue != nullptr) {
+        const auto& recentLossSamples = rexmitQueue->getRecentLossSamples();
+        samples.reserve(recentLossSamples.size());
+        for (const auto& loss : recentLossSamples) {
+            DetailedLossNotificationSample sample;
+            sample.m_valid = true;
+            sample.m_lostPacketBytes = loss.m_lostPacketBytes;
+            sample.m_bytesLoss = loss.m_lostBytesSinceSend;
+            sample.m_txInFlight = loss.m_txInFlight;
+            sample.m_isAppLimited = loss.m_isAppLimited;
+            samples.push_back(sample);
+        }
+        rexmitQueue->clearRecentLossSample();
+    }
     m_lossNotificationSample = {};
     return samples;
 }
@@ -1312,8 +1305,7 @@ void TcpPacedConnection::armRackTimer(RackTimerMode mode, simtime_t delay)
         scheduleAt(expiry, rackTimer);
     m_rackTimerMode = mode;
 
-    if (mode == RackTimerMode::REORDERING)
-        suspendRtoForRack();
+    // RACK has its own self-message in this model; leave INET's RTO armed.
 }
 
 void TcpPacedConnection::clearRackTimer(RackTimerMode mode)
@@ -1324,36 +1316,6 @@ void TcpPacedConnection::clearRackTimer(RackTimerMode mode)
     if (rackTimer->isScheduled())
         cancelEvent(rackTimer);
     m_rackTimerMode = RackTimerMode::NONE;
-
-    if (mode == RackTimerMode::REORDERING)
-        releaseRtoAfterRack();
-}
-
-void TcpPacedConnection::suspendRtoForRack()
-{
-    m_rackOwnsRto = true;
-    getPacedAlgorithm()->suspendRexmitTimerForRack();
-}
-
-void TcpPacedConnection::releaseRtoAfterRack()
-{
-    if (!m_rackOwnsRto)
-        return;
-
-    m_rackOwnsRto = false;
-    getPacedAlgorithm()->suspendRexmitTimerForRack();
-
-    if (state == nullptr || rexmitQueue == nullptr || state->snd_una == state->snd_max)
-        return;
-
-    const simtime_t rexmitTimeout = getPacedAlgorithm()->getRexmitTimeout();
-    simtime_t delay = rexmitTimeout;
-    const simtime_t referenceTime = rexmitQueue->getRtoReferenceTime();
-    if (referenceTime > SIMTIME_ZERO)
-        delay = referenceTime + rexmitTimeout - simTime();
-
-    const simtime_t timerEpsilon(1, SIMTIME_NS);
-    getPacedAlgorithm()->rearmRexmitTimerAfterRack(std::max(delay, timerEpsilon));
 }
 
 void TcpPacedConnection::clearTailLossProbe(bool cancelProbeTimer)
@@ -1376,8 +1338,11 @@ void TcpPacedConnection::resetTailLossProbe()
 void TcpPacedConnection::resetRackTimersForRto()
 {
     m_rackTimerLossDetection = false;
-    m_rackOwnsRto = false;
-    clearRackTimer(RackTimerMode::REORDERING);
+    if (m_rackTimerMode == RackTimerMode::REORDERING) {
+        if (rackTimer->isScheduled())
+            cancelEvent(rackTimer);
+        m_rackTimerMode = RackTimerMode::NONE;
+    }
     clearTailLossProbe(true);
 }
 
@@ -1544,12 +1509,16 @@ bool TcpPacedConnection::checkRackLoss(bool *newLossDetected, bool forceScan)
     if (rexmitQueue->getLost() != 0 && !state->lossRecovery)
         enterRecovery = true;
 
-    if (timeout > 0) {
-        if ((simTime() + timeout) > simTime())
-            armRackTimer(RackTimerMode::REORDERING, timeout);
+    // Linux only arms the reordering timer from the ACK path. The timeout
+    // callback scans once and needs fresh ACK evidence before arming it again.
+    if (!forceScan) {
+        if (timeout > 0) {
+            if ((simTime() + timeout) > simTime())
+                armRackTimer(RackTimerMode::REORDERING, timeout);
+        }
+        else
+            clearRackTimer(RackTimerMode::REORDERING);
     }
-    else
-        clearRackTimer(RackTimerMode::REORDERING);
     return enterRecovery;
 }
 
