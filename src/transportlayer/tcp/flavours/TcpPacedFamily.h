@@ -65,8 +65,13 @@ class TcpPacedFamily : public TcpTahoeRenoFamily
 
     virtual simtime_t getRexmitTimerExpiry() const;
 
-    // Recovery retransmissions must not postpone an RTO already in progress.
+    // Used for non-head recovery retransmissions that must not postpone the RTO.
     void preserveRexmitTimerExpiry(simtime_t expiry);
+
+    // Linux uses one transmit timer slot for RACK's reordering timer and the RTO.
+    void suspendRexmitTimerForRack();
+
+    void rearmRexmitTimerAfterRack(simtime_t delay);
 
     // Congestion-control flavours live in separate dylibs; keep these out of the vtable.
     simtime_t getRexmitTimeout() const { return state->rexmit_timeout; }

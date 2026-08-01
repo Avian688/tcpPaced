@@ -462,6 +462,7 @@ bool TcpPacedConnection::processTimer(cMessage *msg)
                 getPacedAlgorithm()->rackLossDetected();
                 m_rackTimerLossDetection = false;
             }
+            releaseRtoAfterRack();
         }
         else if (rack_enabled && expiredMode == RackTimerMode::LOSS_PROBE)
             sendTailLossProbe();
@@ -700,6 +701,12 @@ bool TcpPacedConnection::sendPendingData()
     if (newDataSent || cwndLimited)
         updateCwndLimitedState(cwndLimited);
 
+    // tcp_rack_mark_lost() clears FLAG_SET_XMIT_TIMER while Linux's shared
+    // transmit timer is running as a RACK reordering timer. ACK processing in
+    // INET may have restarted its separate RTO, so suppress that race here.
+    if (m_rackTimerMode == RackTimerMode::REORDERING)
+        suspendRtoForRack();
+
     return dataSent;
 }
 
@@ -760,12 +767,20 @@ bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
 uint32_t TcpPacedConnection::sendSegmentDuringLossRecoveryPhase(uint32_t seqNum)
 {
     const bool isRetransmission = seqLess(seqNum, state->snd_max);
-    const simtime_t rexmitTimerExpiry = isRetransmission ?
+    const bool retransmitsHead = isRetransmission && rexmitQueue != nullptr &&
+            seqNum == rexmitQueue->getBufferStartSeq();
+    const bool preserveRexmitTimer = isRetransmission && !retransmitsHead;
+    const simtime_t rexmitTimerExpiry = preserveRexmitTimer ?
             getPacedAlgorithm()->getRexmitTimerExpiry() : SIMTIME_MAX;
 
     const uint32_t sentBytes = TcpConnection::sendSegmentDuringLossRecoveryPhase(seqNum);
     if (sentBytes > 0) {
-        if (isRetransmission)
+        // Linux rearms the RTO only when tcp_xmit_retransmit_queue() repairs
+        // the retransmit-queue head. A later recovery retransmission must not
+        // postpone the oldest outstanding packet's deadline.
+        if (retransmitsHead)
+            getPacedAlgorithm()->restartRexmitTimer();
+        else if (preserveRexmitTimer)
             getPacedAlgorithm()->preserveRexmitTimerExpiry(rexmitTimerExpiry);
         getPacedAlgorithm()->recoveryDataSent(sentBytes);
     }
@@ -1340,7 +1355,11 @@ void TcpPacedConnection::armRackTimer(RackTimerMode mode, simtime_t delay)
         scheduleAt(expiry, rackTimer);
     m_rackTimerMode = mode;
 
-    // RACK has its own self-message in this model; leave INET's RTO armed.
+    // Linux represents REO timeout and RTO as modes of one transmit timer.
+    // This model has separate messages, so explicitly give REO timeout
+    // ownership to prevent an ordinary RTO from racing it.
+    if (mode == RackTimerMode::REORDERING)
+        suspendRtoForRack();
 }
 
 void TcpPacedConnection::clearRackTimer(RackTimerMode mode)
@@ -1351,6 +1370,29 @@ void TcpPacedConnection::clearRackTimer(RackTimerMode mode)
     if (rackTimer->isScheduled())
         cancelEvent(rackTimer);
     m_rackTimerMode = RackTimerMode::NONE;
+
+    if (mode == RackTimerMode::REORDERING)
+        releaseRtoAfterRack();
+}
+
+void TcpPacedConnection::suspendRtoForRack()
+{
+    getPacedAlgorithm()->suspendRexmitTimerForRack();
+}
+
+void TcpPacedConnection::releaseRtoAfterRack()
+{
+    if (state == nullptr || rexmitQueue == nullptr || state->snd_una == state->snd_max)
+        return;
+
+    const simtime_t rexmitTimeout = getPacedAlgorithm()->getRexmitTimeout();
+    simtime_t delay = rexmitTimeout;
+    const simtime_t referenceTime = rexmitQueue->getRtoReferenceTime();
+    if (referenceTime > SIMTIME_ZERO)
+        delay = referenceTime + rexmitTimeout - simTime();
+
+    const simtime_t timerEpsilon(1, SIMTIME_NS);
+    getPacedAlgorithm()->rearmRexmitTimerAfterRack(std::max(delay, timerEpsilon));
 }
 
 void TcpPacedConnection::clearTailLossProbe(bool cancelProbeTimer)

@@ -227,6 +227,10 @@ protected:
 
     virtual void clearRackTimer(RackTimerMode mode);
 
+    void suspendRtoForRack();
+
+    void releaseRtoAfterRack();
+
     virtual void scheduleTailLossProbe();
 
     virtual void sendTailLossProbe();
