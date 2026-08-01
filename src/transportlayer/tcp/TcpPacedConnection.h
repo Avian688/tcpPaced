@@ -139,6 +139,8 @@ public:
 
     virtual bool isCwndLimited(uint32_t congestionWindow) const;
 
+    bool wasCwndLimited() const { return m_isCwndLimited; }
+
     virtual void retransmitOneSegment(bool called_at_rto) override;
 
     virtual bool sendDataDuringLossRecovery(uint32_t congestionWindow);
@@ -240,6 +242,8 @@ protected:
     virtual uint32_t getNewlyDetectedLostBytes(uint64_t previousTotalDetectedLostBytes,
                                                bool lossDetected) const;
 
+    void updateCwndLimitedState(bool isCwndLimited);
+
     cOutVector paceValueVec;
     cOutVector bufferedPacketsVec;
     bool pace;
@@ -272,6 +276,10 @@ protected:
     LossNotificationSample m_lossNotificationSample;
     uint32_t m_bytesInFlight;
     uint32_t m_bytesLoss;
+
+    bool m_isCwndLimited = false;
+    uint32_t m_cwndUsageSeq = 0;
+    uint32_t m_maxBytesInFlight = 0;
 
     uint32_t m_appLimited; //NOT NEEDED
     bool m_rateAppLimited; //NOT NEEDED

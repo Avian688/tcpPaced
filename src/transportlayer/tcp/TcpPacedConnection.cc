@@ -102,6 +102,9 @@ void TcpPacedConnection::initConnection(TcpOpenCommand *openCmd)
 
     m_bytesInFlight = 0;
     m_bytesLoss = 0;
+    m_isCwndLimited = false;
+    m_cwndUsageSeq = state->snd_una;
+    m_maxBytesInFlight = 0;
 
     lastThroughputTime = simTime();
     prevLastThroughputTime = simTime();
@@ -197,6 +200,9 @@ void TcpPacedConnection::initClonedConnection(TcpConnection *listenerConn)
 
     TcpConnection::initClonedConnection(listenerConn);
     configureMechanismParameters();
+    m_isCwndLimited = false;
+    m_cwndUsageSeq = state->snd_una;
+    m_maxBytesInFlight = 0;
     m_sndFack = state->snd_una;
     m_reorder = false;
     m_dsackSeen = false;
@@ -659,18 +665,26 @@ void TcpPacedConnection::sendOneNewSegment(bool fullSegmentsOnly, uint32_t conge
 bool TcpPacedConnection::sendPendingData()
 {
     bool dataSent = false;
+    bool newDataSent = false;
+    const uint32_t congestionWindow = getPacedAlgorithm()->getCwnd();
 
     if (!pace && state->lossRecovery) {
-        while (sendDataDuringLossRecovery(getPacedAlgorithm()->getCwnd()))
+        while (sendDataDuringLossRecovery(congestionWindow)) {
             dataSent = true;
+            if (!nextSegSelectedRetransmission)
+                newDataSent = true;
+        }
     }
-    else if (!pace)
-        dataSent = sendData(getPacedAlgorithm()->getCwnd());
+    else if (!pace) {
+        dataSent = sendData(congestionWindow);
+        newDataSent = dataSent;
+    }
     else if (!paceMsg->isScheduled()) {
         if (state->lossRecovery)
-            dataSent = sendDataDuringLossRecovery(getPacedAlgorithm()->getCwnd());
+            dataSent = sendDataDuringLossRecovery(congestionWindow);
         else
-            dataSent = sendDataDuringLossRecovery(getPacedAlgorithm()->getCwnd());
+            dataSent = sendDataDuringLossRecovery(congestionWindow);
+        newDataSent = dataSent && !nextSegSelectedRetransmission;
 
         if (dataSent) {
             EV_INFO << "sendPendingData: Data sent! Scheduling pacing timer for " << simTime() + intersendingTime << "\n";
@@ -681,6 +695,10 @@ bool TcpPacedConnection::sendPendingData()
             EV_INFO << "sendPendingData: no data sent!\n";
         }
     }
+
+    const bool cwndLimited = isCwndLimited(congestionWindow);
+    if (newDataSent || cwndLimited)
+        updateCwndLimitedState(cwndLimited);
 
     return dataSent;
 }
@@ -694,6 +712,23 @@ bool TcpPacedConnection::isCwndLimited(uint32_t congestionWindow) const
         return false;
 
     return m_bytesInFlight + state->snd_mss >= congestionWindow;
+}
+
+void TcpPacedConnection::updateCwndLimitedState(bool isCwndLimited)
+{
+    if (state == nullptr)
+        return;
+
+    // Match Linux tcp_cwnd_validate(): remember a cwnd-limited send until
+    // everything sent in that usage window has been cumulatively ACKed.
+    if (!seqLess(state->snd_una, m_cwndUsageSeq) || isCwndLimited ||
+            (!m_isCwndLimited && m_bytesInFlight > m_maxBytesInFlight)) {
+        m_isCwndLimited = isCwndLimited;
+        m_maxBytesInFlight = m_bytesInFlight;
+        // INET moves snd_nxt backwards for retransmissions; snd_max is the
+        // equivalent of Linux tp->snd_nxt for this usage-window boundary.
+        m_cwndUsageSeq = state->snd_max;
+    }
 }
 
 bool TcpPacedConnection::sendDataDuringLossRecovery(uint32_t congestionWindow)
